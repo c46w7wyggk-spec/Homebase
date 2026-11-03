@@ -5,48 +5,62 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Homebase</title>
 <meta name="description" content="Schedule, meals, goals, faith, and running in one place.">
-<meta name="theme-color" content="#c93e78">
+<meta name="theme-color" content="#fbf1ee" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#140e22" media="(prefers-color-scheme: dark)">
 <meta name="color-scheme" content="light dark">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Homebase">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Figtree:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Figtree:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="wrap" id="appwrap" hidden>
-  <header class="hero"><div class="brand">Homebase</div><h1 id="hero-title"></h1><div class="sub" id="hero-sub"></div></header>
-  <div id="notice"></div>
+<div id="app" hidden>
+  <header class="topbar"><div class="topbar-in">
+    <h1 id="title">Homebase</h1>
+    <button class="icon-btn" id="settings-btn" aria-label="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+  </div></header>
   <main id="view"></main>
+  <button class="fab" id="fab" aria-label="Add"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+  <nav class="tabbar" aria-label="Sections"><div class="tabbar-in" id="tabs"></div></nav>
 </div>
-<nav class="tabs" id="tabbar" aria-label="Areas" hidden><div id="tabs"></div></nav>
 
-<div class="wrap" id="login">
-  <header class="hero"><div class="brand">Homebase</div><h1>Welcome home</h1><div class="sub">Sign in to open your schedule, meals, goals, faith, and running.</div></header>
-  <section class="view">
-    <form class="card" id="login-form" style="display:flex;flex-direction:column;gap:10px">
-      <label class="small muted" for="lg-email">Email</label>
-      <input type="text" id="lg-email" inputmode="email" autocomplete="username" autocapitalize="none" required style="flex:none">
-      <label class="small muted" for="lg-pw">Password</label>
-      <input type="password" id="lg-pw" autocomplete="current-password" minlength="6" required style="background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px">
-      <button class="primary" type="submit" data-mode="signin">Sign in</button>
-      <button class="ghost" type="submit" data-mode="signup">Create account</button>
-      <div class="small muted" id="login-msg" role="status"></div>
+<div id="login" hidden>
+  <header class="topbar"><div class="topbar-in"><h1>Homebase</h1></div></header>
+  <main>
+    <div class="hero"><div class="eyebrow">Welcome home</div><div class="big">Sign in</div><div class="where">Your schedule, meals, goals, faith, and running.</div></div>
+    <form class="card" id="login-form" style="display:flex;flex-direction:column;gap:12px">
+      <label class="field"><span>Email</span><input type="email" id="lg-email" autocomplete="username" autocapitalize="none" required></label>
+      <label class="field"><span>Password</span><input type="password" id="lg-pw" autocomplete="current-password" required></label>
+      <button class="btn primary block" type="submit">Sign in</button>
+      <div class="s" id="login-msg" role="status" style="color:var(--muted);font-size:14px"></div>
     </form>
-  </section>
+  </main>
 </div>
+
+<div class="scrim" id="scrim" hidden></div>
+<section class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" hidden>
+  <div class="grab"></div>
+  <div class="sheet-h"><h3 id="sheet-title"></h3><button class="icon-btn" id="sheet-close" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+  <form class="sheet-b" id="sheet-body" novalidate></form>
+</section>
+<div class="toast" id="toast" role="status" aria-live="polite"><span id="toast-msg"></span><button id="toast-undo" hidden>Undo</button></div>
 
 <script src="vendor/supabase.js"></script>
 <script src="config.js"></script>
 <script src="app.js"></script>
 <script>
-if ("serviceWorker" in navigator) addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });
+if ("serviceWorker" in navigator) {
+  var hadController = !!navigator.serviceWorker.controller, reloaded = false;
+  navigator.serviceWorker.addEventListener("controllerchange", function () { if (hadController && !reloaded) { reloaded = true; location.reload(); } });
+  addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });
+}
 </script>
 </body>
 </html>
