@@ -421,26 +421,6 @@
       submit: function (v) { if (!+v("val")) return false; save("weights", v("date"), { date: v("date"), value: +v("val") }); toast("Saved"); } });
   }
 
-  function planSetupSheet() {
-    var p = plan(), i = (p && p.inputs) || { goal: "base", days: 5, longDay: 6, current: 15, peak: 30 };
-    openSheet({
-      title: "Build my training plan",
-      html: '<p class="s" style="margin:0;color:var(--muted)">Answer what you can. The plan starts this week, builds gradually with a lighter week every fourth week, and tapers into race day.</p>' +
-        '<div class="grid2">' + field("Goal", select("goal", [["base", "General comeback"], ["5k", "5K"], ["10k", "10K"], ["half", "Half marathon"], ["marathon", "Marathon"]], i.goal)) + field("Race date", input("raceDate", i.raceDate, 'type="date"')) + '</div>' +
-        '<div class="grid2">' + field("Miles per week now", input("current", i.current, 'type="number" min="0" inputmode="decimal"')) + field("Peak miles per week", input("peak", i.peak, 'type="number" min="0" inputmode="decimal"')) + '</div>' +
-        '<div class="grid2">' + field("Days per week", select("days", [[3, "3"], [4, "4"], [5, "5"], [6, "6"], [7, "7"]], i.days)) + field("Long run day", select("longDay", DAYS_LONG.map(function (d, k) { return [k, d]; }), i.longDay)) + '</div>' +
-        '<div class="grid2">' + field("Recent race", select("raceDist", [["", "None"], ["1mi", "Mile"], ["5k", "5K"], ["10k", "10K"], ["half", "Half"], ["marathon", "Marathon"]], i.raceDist || "")) + field("Its time", input("raceTime", i.raceTime, 'type="text" inputmode="numeric" placeholder="21:30"')) + '</div>' +
-        field("Goal time for the race (optional)", input("goalTime", i.goalTime, 'type="text" inputmode="numeric" placeholder="1:35:00"')) +
-        '<label class="toggle"><input type="checkbox" name="strength"' + (i.strength ? " checked" : "") + '> Add two short strength sessions a week</label>' +
-        field("Injuries or notes", '<textarea name="notes" placeholder="Optional">' + esc(i.notes || "") + '</textarea>') +
-        primary(p ? "Rebuild plan" : "Build plan") + (p ? sbtn("Remove plan", "remove", "danger") : ""),
-      submit: function (v) {
-        var inp = { goal: v("goal"), raceDate: v("raceDate"), current: +v("current") || 10, peak: +v("peak") || 0, days: +v("days"), longDay: +v("longDay"), raceDist: v("raceDist"), raceTime: v("raceTime"), goalTime: v("goalTime"), strength: v("strength"), notes: v("notes") };
-        save("settings", "plan", genPlan(inp)); ui.planWeek = 0; ui.fit = "plan"; toast("Training plan ready");
-      },
-      actions: { remove: function () { delUndo("settings", "plan", "Plan"); } }
-    });
-  }
   function planDaySheet(ds) {
     var p = plan(), it = p.days[ds], done = runsOn(ds).filter(function (w) { return w.type === "Run"; });
     openSheet({
@@ -492,8 +472,8 @@
     h += '<div class="hero"><div class="eyebrow">' + longDate(t) + (n ? " · Up next" : "") + '</div>' +
       (n ? '<div class="big">' + esc(n.e.title) + '</div><div class="when">' + whenText(n) + '</div>' + (n.e.place ? '<div class="where">' + esc(n.e.place) + '</div>' : "")
         : '<div class="big">' + (hr < 12 ? "Good morning" : hr < 18 ? "Good afternoon" : "Good evening") + '</div><div class="where">Nothing else on the calendar.</div>') + '</div>';
-    var evs = eventsOn(t);
-    h += card("Today", evs.length ? '<div class="list">' + evs.map(function (e) { return eventRow(e, t); }).join("") + '</div>' : '<div class="empty">Nothing scheduled. Tap + to add.</div>', linkBtn("Week", "goto", ' data-tab="schedule"'));
+    var now = new Date(), evs = eventsOn(t).filter(function (e) { return !e.time || endOf(t, e) >= now; });
+    h += card("Today", evs.length ? '<div class="list">' + evs.map(function (e) { return eventRow(e, t); }).join("") + '</div>' : '<div class="empty">Nothing else today.</div>', linkBtn("Week", "goto", ' data-tab="schedule"'));
     var p = plan(), it = p && p.days[t], ran = runsOn(t);
     if (it || ran.length) {
       var body = "";
@@ -611,7 +591,7 @@
     var h = '<div class="seg" role="tablist">' + [["plan", "Plan"], ["log", "Log"], ["stats", "Stats"]].map(function (s) { return '<button role="tab" class="' + (ui.fit === s[0] ? "on" : "") + '" data-act="fit" data-v="' + s[0] + '">' + s[1] + '</button>'; }).join("") + '</div>';
     var p = plan(), t = today(), mon = mondayOf(new Date());
     if (ui.fit === "plan") {
-      if (!p) return h + card("Training plan", '<p style="margin:0 0 12px">Tell Homebase your goal, current mileage and schedule, and it builds a week-by-week running plan with paces. You can also send your answers in chat and Claude will set it up.</p><button class="btn primary block" data-act="plansetup">Build my plan</button>');
+      if (!p) return h + card("Training plan", '<div class="empty">No plan yet. Ask Claude in chat and it will build one for you.</div>');
       var ws = addDays(mon, 7 * ui.planWeek), wsS = ymd(ws), wi = p.weeks.findIndex(function (w) { return w.start === wsS; });
       var wk = p.weeks[wi], planned = 0, done = weekMiles(wsS), rows = "";
       for (var i = 0; i < 7; i++) {
@@ -622,9 +602,9 @@
       }
       var head = '<div class="row" style="margin-bottom:8px"><button class="btn ghost" data-act="pweek" data-d="-1" aria-label="Previous week">‹</button><div class="grow" style="text-align:center"><b>' + (wk ? "Week " + (wi + 1) + " of " + p.weeks.length : shortDate(wsS)) + '</b><div class="s" style="font-size:13px;color:var(--muted)">' + (wk ? wk.phase.charAt(0).toUpperCase() + wk.phase.slice(1) + " phase · " : "") + r1(done) + " of " + r1(planned) + ' mi</div></div><button class="btn ghost" data-act="pweek" data-d="1" aria-label="Next week">›</button></div>' +
         '<div class="bar" style="margin-bottom:6px"><i style="width:' + (planned ? Math.min(100, Math.round(100 * done / planned)) : 0) + '%"></i></div>';
-      h += card(GOAL_LABEL[p.inputs.goal] + (p.inputs.raceDate ? " · " + shortDate(p.inputs.raceDate) : ""), head + (rows || '<div class="empty">This week is outside your plan.</div>'), linkBtn("Edit", "plansetup"));
+      h += card(GOAL_LABEL[p.inputs.goal] + (p.inputs.raceDate ? " · " + shortDate(p.inputs.raceDate) : ""), head + (rows || '<div class="empty">This week is outside your plan.</div>'));
       var P = paces(p.inputs);
-      if (P) h += card("Your paces", '<div class="list">' + [["Easy and long", mmss(P.easy[0]) + "–" + mmss(P.easy[1])], ["Tempo", mmss(P.tempo)], ["5K pace", mmss(P.i5k)], ["10K pace", mmss(P.p10)], ["Half marathon", mmss(P.ph)], ["Marathon", mmss(P.pm)]].concat(P.goal && p.inputs.goal !== "base" ? [["Goal pace", mmss(P.goal)]] : []).map(function (x) { return '<div class="item"><div class="main">' + x[0] + '</div><b style="font-variant-numeric:tabular-nums">' + x[1] + ' /mi</b></div>'; }).join("") + '</div><p class="s" style="margin:8px 0 0;color:var(--muted);font-size:13px">Estimated from your ' + esc({ "1mi": "mile", "5k": "5K", "10k": "10K", half: "half marathon", marathon: "marathon" }[p.inputs.raceDist]) + ' time of ' + esc(p.inputs.raceTime) + '. Run by feel on hot or hilly days.</p>');
+      if (P) h += card("Your paces", '<div class="list">' + [["Easy and long", mmss(P.easy[0]) + "–" + mmss(P.easy[1])], ["Tempo", mmss(P.tempo)], ["5K pace", mmss(P.i5k)], ["10K pace", mmss(P.p10)], ["Half marathon", mmss(P.ph)], ["Marathon", mmss(P.pm)]].concat(P.goal && p.inputs.goal !== "base" ? [["Goal pace", mmss(P.goal)]] : []).map(function (x) { return '<div class="item"><div class="main">' + x[0] + '</div><b style="font-variant-numeric:tabular-nums">' + x[1] + ' /mi</b></div>'; }).join("") + '</div><p class="s" style="margin:8px 0 0;color:var(--muted);font-size:13px">' + (p.custom ? 'Target paces for a ' + esc(p.inputs.goalTime || p.inputs.raceTime) + ' 5K.' : 'Estimated from your ' + esc({ "1mi": "mile", "5k": "5K", "10k": "10K", half: "half marathon", marathon: "marathon" }[p.inputs.raceDist]) + ' time of ' + esc(p.inputs.raceTime) + '.') + ' Run by feel on hot or hilly days.</p>');
       return h;
     }
     if (ui.fit === "log") {
@@ -696,7 +676,6 @@
       case "editprayer": prayerSheet(id); break;
       case "newprayer": prayerSheet(); break;
       case "fit": ui.fit = b.dataset.v; render(true); break;
-      case "plansetup": planSetupSheet(); break;
       case "planday": planDaySheet(ds); break;
       case "logplan": var it = plan().days[ds]; runSheet(null, { date: ds, type: "Run", kind: { long: "Long", tempo: "Tempo", intervals: "Intervals", pace: "Tempo", race: "Race" }[it.type] || "Easy", miles: it.miles }); break;
       case "pweek": ui.planWeek += +b.dataset.d; render(true); break;
