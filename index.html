@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Homebase</title>
+<meta name="description" content="Schedule, meals, goals, faith, and running in one place.">
+<meta name="theme-color" content="#c93e78">
+<meta name="color-scheme" content="light dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Homebase">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Figtree:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap" id="appwrap" hidden>
+  <header class="hero"><div class="brand">Homebase</div><h1 id="hero-title"></h1><div class="sub" id="hero-sub"></div></header>
+  <div id="notice"></div>
+  <main id="view"></main>
+</div>
+<nav class="tabs" id="tabbar" aria-label="Areas" hidden><div id="tabs"></div></nav>
+
+<div class="wrap" id="login">
+  <header class="hero"><div class="brand">Homebase</div><h1>Welcome home</h1><div class="sub">Sign in to open your schedule, meals, goals, faith, and running.</div></header>
+  <section class="view">
+    <form class="card" id="login-form" style="display:flex;flex-direction:column;gap:10px">
+      <label class="small muted" for="lg-email">Email</label>
+      <input type="text" id="lg-email" inputmode="email" autocomplete="username" autocapitalize="none" required style="flex:none">
+      <label class="small muted" for="lg-pw">Password</label>
+      <input type="password" id="lg-pw" autocomplete="current-password" minlength="6" required style="background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px">
+      <button class="primary" type="submit" data-mode="signin">Sign in</button>
+      <button class="ghost" type="submit" data-mode="signup">Create account</button>
+      <div class="small muted" id="login-msg" role="status"></div>
+    </form>
+  </section>
+</div>
+
+<script src="vendor/supabase.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+<script>
+if ("serviceWorker" in navigator) addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });
+</script>
+</body>
+</html>
