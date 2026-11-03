@@ -1,5 +1,5 @@
 // Offline shell: app files are cached on install; navigations try the network first so updates arrive quickly.
-const VERSION = "hb-v2";
+const VERSION = "hb-v3";
 const SHELL = ["./", "index.html", "style.css", "app.js", "config.js", "vendor/supabase.js", "manifest.webmanifest",
   "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 
