@@ -16,7 +16,7 @@
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
   function shortDate(s) { return parse(s).toLocaleDateString(undefined, { month: "short", day: "numeric" }); }
   function longDate(s) { return parse(s).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" }); }
-  function time12(t) { if (!t) return "All day"; var p = t.split(":"), h = +p[0]; return ((h % 12) || 12) + ":" + p[1] + (h < 12 ? " AM" : " PM"); }
+  function time24(t) { if (!t) return "All day"; var p = t.split(":"); return ("0" + (+p[0])).slice(-2) + ":" + p[1]; }
   function stamp(ds, t) { var p = ds.split("-"), q = (t || "00:00").split(":"); return new Date(+p[0], +p[1] - 1, +p[2], +q[0], +q[1]); }
   function newId() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
   function r1(x) { return Math.round(x * 10) / 10; }
@@ -75,13 +75,13 @@
   }
   function whenText(n) {
     var e = n.e;
-    if (n.now) return "Happening now · until " + time12(e.end || "");
+    if (n.now) return "Happening now · until " + time24(e.end || "");
     if (n.ds === today()) {
       var m = Math.max(1, Math.round((n.start - new Date()) / 60000));
-      return "In " + (m >= 60 ? Math.floor(m / 60) + "h " : "") + (m % 60 ? (m % 60) + "m" : "") + " · " + time12(e.time);
+      return "In " + (m >= 60 ? Math.floor(m / 60) + "h " : "") + (m % 60 ? (m % 60) + "m" : "") + " · " + time24(e.time);
     }
     var tmr = ymd(addDays(new Date(), 1)) === n.ds;
-    return (tmr ? "Tomorrow" : longDate(n.ds)) + " · " + time12(e.time);
+    return (tmr ? "Tomorrow" : longDate(n.ds)) + " · " + time24(e.time);
   }
 
   /* ================= habits ================= */
@@ -461,8 +461,8 @@
   function linkBtn(label, act, extra) { return '<button class="link" data-act="' + act + '"' + (extra || "") + '>' + label + '</button>'; }
   function eventRow(e, ds) {
     var past = ds === today() && e.time && endOf(ds, e) < new Date();
-    var sub = []; if (e.end) sub.push("until " + time12(e.end)); if (e.place) sub.push(esc(e.place));
-    return '<div class="item tap' + (past ? " past" : "") + '" data-act="editev" data-id="' + e.id + '" data-date="' + ds + '"><span class="time">' + time12(e.time) + '</span><div class="main"><div class="t">' + esc(e.title) + '</div>' +
+    var sub = []; if (e.end) sub.push("until " + time24(e.end)); if (e.place) sub.push(esc(e.place));
+    return '<div class="item tap' + (past ? " past" : "") + '" data-act="editev" data-id="' + e.id + '" data-date="' + ds + '"><span class="time">' + time24(e.time) + '</span><div class="main"><div class="t">' + esc(e.title) + '</div>' +
       (sub.length ? '<div class="s">' + sub.join(" · ") + '</div>' : "") + '</div>' + (e.ref ? '<span class="pill muted">Class</span>' : "") + '</div>';
   }
 
