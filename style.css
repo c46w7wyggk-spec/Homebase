@@ -37,8 +37,8 @@ button { touch-action: manipulation; }
 [hidden] { display: none !important; }
 
 /* top bar */
-.topbar { position: sticky; top: 0; z-index: 20; background: var(--bg);
-  padding: calc(var(--top) + 10px) max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left)); }
+.topbar { position: relative; z-index: 20; background: var(--bg);
+  padding: calc(var(--top) + 30px) max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left)); }
 .topbar-in { max-width: 640px; margin: 0 auto; display: flex; align-items: center; gap: 12px; }
 .topbar h1 { font-family: var(--font-display); font-size: 24px; margin: 0; letter-spacing: -0.02em; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .icon-btn { width: 40px; height: 40px; border-radius: 50%; border: 0; background: var(--surface2); display: grid; place-items: center; cursor: pointer; flex: none; }
