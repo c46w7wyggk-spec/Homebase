@@ -36,7 +36,7 @@
     fitness: '<svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>',
     chev: '<svg class="chev" viewBox="0 0 24 24" width="18" height="18" style="stroke:currentColor;fill:none;stroke-width:2"><path d="M9 6l6 6-6 6"/></svg>'
   };
-  var TABS = [["today", "Today"], ["schedule", "Schedule"], ["meals", "Meals"], ["goals", "Goals"], ["faith", "Faith"], ["fitness", "Run"]];
+  var TABS = [["today", "Today"], ["schedule", "Schedule"], ["goals", "Goals"], ["faith", "Faith"], ["fitness", "Run"]];
 
   /* ================= state ================= */
   var state = {}; COLS.forEach(function (c) { state[c] = []; });
@@ -425,9 +425,46 @@
   }
   function milesOf(str) { var n = parseFloat(String(str || "").replace(",", ".")); return n > 0 ? Math.round(n * 100) / 100 : 0; }
   function timeOf(f) { var g = function (n) { return parseInt(f.elements[n].value, 10) || 0; }; return g("th") * 3600 + g("tm") * 60 + g("tsec"); }
-  function weightSheet() {
-    openSheet({ title: "Log weight", html: '<div class="grid2">' + field("Date", input("date", today(), 'type="date" required')) + field("Weight", input("val", "", 'type="number" step="0.1" min="1" inputmode="decimal" required')) + '</div>' + primary("Save"),
-      submit: function (v) { if (!+v("val")) return false; save("weights", v("date"), { date: v("date"), value: +v("val") }); toast("Saved"); } });
+  function weightSheet(id) {
+    var w = id ? byId("weights", id) : null;
+    openSheet({ title: w ? "Edit weigh-in" : "Log weight", html: '<div class="grid2">' + field("Date", input("date", w ? w.date : today(), 'type="date" required')) + field("Weight (lbs)", input("val", w ? w.value : "", 'type="text" inputmode="decimal" autocomplete="off" placeholder="165.4"')) + '</div>' + primary("Save") + (w ? sbtn("Delete weigh-in", "delete", "danger") : ""),
+      submit: function (v) { var n = milesOf(v("val")); if (!n) return false; if (w && w.date !== v("date")) del("weights", id); save("weights", v("date"), { date: v("date"), value: r1(n) }); toast("Saved"); },
+      actions: { "delete": function () { delUndo("weights", id, "Weigh-in"); } } });
+  }
+  function weightCard() {
+    var wts = state.weights.filter(function (w) { return +w.value > 0; }).sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+    if (!wts.length) return card("Body weight", '<div class="empty">No weigh-ins yet. Tap Log to add one.</div>', linkBtn("Log", "newweight"));
+    var last = wts[wts.length - 1], cur = +last.value;
+    var delta = function (days) {
+      var cut = ymd(addDays(parse(last.date), -days)), base = null;
+      for (var i = wts.length - 1; i >= 0; i--) if (wts[i].date <= cut) { base = wts[i]; break; }
+      if (!base) { var inWin = wts.filter(function (w) { return w.date > cut && w.date < last.date; }); base = inWin[0] || null; }
+      if (!base) return "–";
+      var d = r1(cur - base.value); return (d > 0 ? "+" : d < 0 ? "−" : "±") + Math.abs(d);
+    };
+    var rng = ui.wRange || "month", days = { week: 7, month: 30, year: 365, all: 99999 }[rng];
+    var from = ymd(addDays(parse(last.date), -days)), pts = wts.filter(function (w) { return w.date >= from; });
+    var h = '<div class="stats" style="grid-template-columns:repeat(4,1fr);margin-bottom:10px"><div class="stat"><b>' + cur + '</b><span>lbs now</span></div><div class="stat"><b>' + delta(7) + '</b><span>past week</span></div><div class="stat"><b>' + delta(30) + '</b><span>past month</span></div><div class="stat"><b>' + delta(365) + '</b><span>past year</span></div></div>';
+    h += '<div class="seg" role="tablist" style="margin-bottom:8px">' + [["week", "Week"], ["month", "Month"], ["year", "Year"], ["all", "All"]].map(function (x) { return '<button role="tab" class="' + (rng === x[0] ? "on" : "") + '" data-act="wrange" data-v="' + x[0] + '">' + x[1] + '</button>'; }).join("") + '</div>';
+    h += pts.length > 1 ? weightChart(pts) : '<div class="empty">Log one more weigh-in in this range to see the graph.</div>';
+    h += '<div class="list" style="margin-top:8px">' + wts.slice(-5).reverse().map(function (w) { return '<div class="item tap" data-act="editweight" data-id="' + w.id + '"><span class="time">' + shortDate(w.date) + '</span><div class="main t">' + w.value + ' lbs</div>' + ICON.chev + '</div>'; }).join("") + '</div>';
+    return card("Body weight", h, linkBtn("Log", "newweight"));
+  }
+  function weightChart(pts) {
+    var W = 320, H = 130, L = 34, T = 8, B = 22;
+    var vals = pts.map(function (p) { return +p.value; }), lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+    if (hi - lo < 2) { var mid = (hi + lo) / 2; lo = mid - 1; hi = mid + 1; }
+    var pad = (hi - lo) * 0.1; lo = Math.floor(lo - pad); hi = Math.ceil(hi + pad);
+    var t0 = parse(pts[0].date).getTime(), t1 = parse(pts[pts.length - 1].date).getTime(), span = Math.max(1, t1 - t0);
+    var X = function (p) { return L + (W - L - 8) * (parse(p.date).getTime() - t0) / span; }, Y = function (v) { return T + (H - T - B) * (1 - (v - lo) / (hi - lo)); };
+    var s = '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="Body weight over time">';
+    [lo, (lo + hi) / 2, hi].forEach(function (v) { var y = Y(v); s += '<line x1="' + L + '" x2="' + (W - 8) + '" y1="' + y + '" y2="' + y + '" stroke="var(--line)"/><text x="0" y="' + (y + 3) + '">' + r1(v) + '</text>'; });
+    var d = pts.map(function (p, i) { return (i ? "L" : "M") + X(p).toFixed(1) + " " + Y(+p.value).toFixed(1); }).join(" ");
+    s += '<path d="' + d + '" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>';
+    if (pts.length <= 40) pts.forEach(function (p) { s += '<circle cx="' + X(p).toFixed(1) + '" cy="' + Y(+p.value).toFixed(1) + '" r="3" fill="var(--accent)"/>'; });
+    var lab = function (p, anchor) { return '<text x="' + X(p).toFixed(1) + '" y="' + (H - 6) + '" text-anchor="' + anchor + '">' + shortDate(p.date) + '</text>'; };
+    s += lab(pts[0], "start") + lab(pts[pts.length - 1], "end");
+    return s + '</svg>';
   }
 
   function planDaySheet(ds) {
@@ -499,10 +536,6 @@
     var tr = todaysReading();
     h += card("Reading", tr ? '<div class="item"><button class="check' + (tr.done ? " on" : "") + '" data-act="readdone" aria-pressed="' + tr.done + '" aria-label="Mark reading done"></button><div class="main"><div class="t">' + esc(tr.text) + '</div><div class="s">' + (tr.done ? "Done today" : "Today's reading") + '</div></div></div>'
       : '<div class="empty">Set up a reading plan to see today\'s passage here.</div>', linkBtn(tr ? "Reflect" : "Set up", tr ? "note" : "readsetup", ' data-date="' + t + '"'));
-    h += card("Meals", '<div class="list">' + SLOTS.slice(0, 3).map(function (s) {
-      var m = byId("meals", t + "_" + s[0]);
-      return '<div class="item tap" data-act="meal" data-date="' + t + '" data-slot="' + s[0] + '"><span class="time">' + s[1] + '</span><div class="main t' + (m ? "" : " s") + '">' + (m ? esc(m.text) : "Add") + '</div></div>';
-    }).join("") + '</div>');
     return h;
   };
 
@@ -630,15 +663,13 @@
     var total30 = runs.filter(function (w) { return w.date >= ymd(addDays(new Date(), -30)); }).reduce(function (a, w) { return a + +w.miles; }, 0);
     h += card("Mileage", '<div class="stats" style="margin-bottom:10px"><div class="stat"><b>' + r1(weekMiles(ymd(mon))) + '</b><span>this week</span></div><div class="stat"><b>' + r1(total30) + '</b><span>last 30 days</span></div><div class="stat"><b>' + (longest ? r1(longest) : "–") + '</b><span>longest run</span></div></div>' + chart(weeks) +
       '<p class="s" style="margin:6px 0 0;color:var(--muted);font-size:13px">' + (p ? "Dashed outline shows planned miles. " : "") + (best ? "Fastest 3+ mile run: " + paceOf(+best.miles, +best.minutes) + " /mi on " + shortDate(best.date) + "." : "") + '</p>');
-    var wts = state.weights.slice().sort(function (a, b) { return a.date < b.date ? -1 : 1; }).slice(-30);
-    var wbody = wts.length ? '<div class="stats"><div class="stat"><b>' + wts[wts.length - 1].value + '</b><span>latest</span></div><div class="stat"><b>' + (wts.length > 1 ? (wts[wts.length - 1].value - wts[0].value > 0 ? "+" : "") + r1(wts[wts.length - 1].value - wts[0].value) : "–") + '</b><span>change</span></div><div class="stat"><b>' + wts.length + '</b><span>weigh-ins</span></div></div>' : '<div class="empty">No weigh-ins yet.</div>';
-    h += card("Body weight", wbody, linkBtn("Log", "newweight"));
+    h += weightCard();
     return h;
   };
 
   /* ================= render ================= */
   var view = $("view"), lastHtml = "", lastTab = "";
-  function current() { var hsh = location.hash.replace("#", ""); return views[hsh] ? hsh : "today"; }
+  function current() { var hsh = location.hash.replace("#", ""); return views[hsh] && TABS.some(function (x) { return x[0] === hsh; }) ? hsh : "today"; }
   function typing() { var a = document.activeElement; return a && view.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName); }
   var pending = false;
   function render(force) {
@@ -691,6 +722,8 @@
       case "editrun": runSheet(id); break;
       case "newrun": runSheet(); break;
       case "newweight": weightSheet(); break;
+      case "editweight": weightSheet(b.dataset.id); break;
+      case "wrange": ui.wRange = b.dataset.v; render(true); break;
     }
   });
   view.addEventListener("submit", function (ev) {
@@ -736,7 +769,7 @@
     if (tab === "fitness") return runSheet();
     if (tab === "goals") return quickMenu([["Habit", function () { habitSheet(); }], ["Goal", function () { goalSheet(); }]]);
     if (tab === "meals") return quickMenu([["Meal today", function () { mealSheet(today(), new Date().getHours() < 11 ? "breakfast" : new Date().getHours() < 16 ? "lunch" : "dinner"); }], ["Grocery item", function () { var el = $("gtext"); if (el) el.focus(); }]]);
-    quickMenu([["Event", function () { eventSheet(null, today()); }], ["Workout", function () { runSheet(); }], ["Meal", function () { mealSheet(today(), new Date().getHours() < 11 ? "breakfast" : new Date().getHours() < 16 ? "lunch" : "dinner"); }], ["Prayer request", function () { prayerSheet(); }], ["Habit", function () { habitSheet(); }], ["Goal", function () { goalSheet(); }]]);
+    quickMenu([["Event", function () { eventSheet(null, today()); }], ["Workout", function () { runSheet(); }], ["Prayer request", function () { prayerSheet(); }], ["Habit", function () { habitSheet(); }], ["Goal", function () { goalSheet(); }]]);
   });
   $("settings-btn").addEventListener("click", settingsSheet);
 
