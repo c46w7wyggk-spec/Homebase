@@ -20,6 +20,7 @@
   function stamp(ds, t) { var p = ds.split("-"), q = (t || "00:00").split(":"); return new Date(+p[0], +p[1] - 1, +p[2], +q[0], +q[1]); }
   function newId() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
   function r1(x) { return Math.round(x * 10) / 10; }
+  function r2(x) { return Math.round(x * 100) / 100; }
   function half(x) { return Math.max(0, Math.round(x * 2) / 2); }
   function clamp(x, a, b) { return Math.max(a, Math.min(b, x)); }
   function secs(str) { if (!str) return 0; var p = String(str).trim().split(":").map(Number); if (p.some(isNaN)) return 0; return p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p.length === 2 ? p[0] * 60 + p[1] : p[0] * 60; }
@@ -400,22 +401,30 @@
 
   function runSheet(id, preset) {
     var w = id ? byId("workouts", id) : null, d = w || Object.assign({ date: today(), type: "Run", kind: "Easy" }, preset || {});
-    var dur = d.minutes ? mmss(d.minutes * 60) : "";
+    var ts = Math.round(d.seconds || (d.minutes ? d.minutes * 60 : 0)), th = ts ? Math.floor(ts / 3600) : "", tm = ts ? Math.floor(ts % 3600 / 60) : "", tsec = ts ? ts % 60 : "";
+    var num = 'type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off"';
     openSheet({
       title: w ? "Edit workout" : "Log workout",
       html: '<div class="grid2">' + field("Date", input("date", d.date, 'type="date" required')) + field("Type", select("type", [["Run", "Run"], ["Strength", "Strength"], ["Cross-train", "Cross-train"], ["Mobility", "Mobility"], ["Other", "Other"]], d.type)) + '</div>' +
         '<div class="grid2">' + field("Run type", select("kind", [["Easy", "Easy"], ["Long", "Long"], ["Tempo", "Tempo"], ["Intervals", "Intervals"], ["Race", "Race"], ["Recovery", "Recovery"]], d.kind || "Easy")) + field("Effort (1–10)", select("rpe", [["", "–"]].concat([1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(function (n) { return [n, n]; })), d.rpe || "")) + '</div>' +
-        '<div class="grid2">' + field("Miles", input("miles", d.miles || "", 'type="number" step="0.01" min="0" inputmode="decimal"')) + field("Time (h:mm:ss)", input("dur", dur, 'type="text" inputmode="numeric" placeholder="45:30"')) + '</div>' +
+        '<div class="grid2">' + field("Miles", input("miles", d.miles || "", 'type="text" inputmode="decimal" autocomplete="off" placeholder="3.25"')) + '<div class="field"><span>Pace</span><div class="pace-out" id="pace-out">–</div></div></div>' +
+        '<div class="field"><span>Time</span><div class="time3">' + input("th", th || "", num + ' placeholder="hr" aria-label="Hours"') + input("tm", tm === "" ? "" : tm, num + ' placeholder="min" aria-label="Minutes"') + input("tsec", tsec === "" ? "" : tsec, num + ' placeholder="sec" aria-label="Seconds"') + '</div></div>' +
         field("Notes", '<textarea name="note" placeholder="Route, splits, how it felt">' + esc(d.note || "") + '</textarea>') +
         primary(w ? "Save" : "Log it") + (w ? sbtn("Delete workout", "delete", "danger") : ""),
-      submit: function (v) {
-        var m = secs(v("dur")) / 60;
-        save("workouts", id || newId(), { date: v("date"), type: v("type"), kind: v("type") === "Run" ? v("kind") : "", miles: +v("miles") || 0, minutes: m ? r1(m * 10) / 10 : "", rpe: v("rpe"), note: v("note") });
+      onOpen: function (f) {
+        var upd = function () { var t = timeOf(f), mi = milesOf(f.elements.miles.value); $("pace-out").textContent = t && mi ? mmss(t / mi) + " /mi" : "–"; };
+        f.addEventListener("input", upd); upd();
+      },
+      submit: function (v, f) {
+        var t = timeOf(f), mi = milesOf(v("miles"));
+        save("workouts", id || newId(), { date: v("date"), type: v("type"), kind: v("type") === "Run" ? v("kind") : "", miles: mi, seconds: t || "", minutes: t ? t / 60 : "", rpe: v("rpe"), note: v("note") });
         toast(w ? "Saved" : "Workout logged");
       },
       actions: { "delete": function () { delUndo("workouts", id, "Workout"); } }
     });
   }
+  function milesOf(str) { var n = parseFloat(String(str || "").replace(",", ".")); return n > 0 ? Math.round(n * 100) / 100 : 0; }
+  function timeOf(f) { var g = function (n) { return parseInt(f.elements[n].value, 10) || 0; }; return g("th") * 3600 + g("tm") * 60 + g("tsec"); }
   function weightSheet() {
     openSheet({ title: "Log weight", html: '<div class="grid2">' + field("Date", input("date", today(), 'type="date" required')) + field("Weight", input("val", "", 'type="number" step="0.1" min="1" inputmode="decimal" required')) + '</div>' + primary("Save"),
       submit: function (v) { if (!+v("val")) return false; save("weights", v("date"), { date: v("date"), value: +v("val") }); toast("Saved"); } });
@@ -426,7 +435,7 @@
     openSheet({
       title: it.title + " · " + shortDate(ds),
       html: '<div><span class="type ' + it.type + '">' + it.type + '</span>' + (it.miles ? '<b>' + it.miles + ' mi</b>' : "") + '</div><p style="margin:0">' + esc(it.detail) + '</p>' +
-        (done.length ? '<div class="pill good" style="align-self:flex-start">Logged: ' + done.map(function (w) { return r1(w.miles) + " mi"; }).join(", ") + '</div>' : "") +
+        (done.length ? '<div class="pill good" style="align-self:flex-start">Logged: ' + done.map(function (w) { return r2(w.miles) + " mi"; }).join(", ") + '</div>' : "") +
         (it.type !== "rest" ? primary(done.length ? "Log another" : "Log this run") : ""),
       submit: function () { setTimeout(function () { runSheet(null, { date: ds, type: "Run", kind: { long: "Long", tempo: "Tempo", intervals: "Intervals", pace: "Tempo", race: "Race" }[it.type] || "Easy", miles: it.miles }); }, 300); }
     });
@@ -478,7 +487,7 @@
     if (it || ran.length) {
       var body = "";
       if (it) body += '<div class="item tap" data-act="planday" data-date="' + t + '"><div class="main"><div class="t"><span class="type ' + it.type + '">' + it.type + '</span>' + esc(it.title) + (it.miles ? " · " + it.miles + " mi" : "") + '</div><div class="s">' + esc(it.detail) + '</div></div>' + ICON.chev + '</div>';
-      ran.forEach(function (w) { body += '<div class="item tap" data-act="editrun" data-id="' + w.id + '"><span class="pill good">Done</span><div class="main">' + esc(w.type === "Run" ? (w.kind || "Run") + " run" : w.type) + (w.miles ? " · " + r1(w.miles) + " mi" : "") + (w.minutes ? " · " + mmss(w.minutes * 60) : "") + '</div></div>'; });
+      ran.forEach(function (w) { body += '<div class="item tap" data-act="editrun" data-id="' + w.id + '"><span class="pill good">Done</span><div class="main">' + esc(w.type === "Run" ? (w.kind || "Run") + " run" : w.type) + (w.miles ? " · " + r2(w.miles) + " mi" : "") + (w.minutes ? " · " + mmss(w.minutes * 60) : "") + '</div></div>'; });
       if (it && it.type !== "rest" && !ran.length) body += '<button class="btn primary block" style="margin-top:8px" data-act="logplan" data-date="' + t + '">Log this run</button>';
       h += card("Training", body, linkBtn("Plan", "goto", ' data-tab="fitness"'));
     }
@@ -611,7 +620,7 @@
       var recent = state.workouts.slice().sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; }).slice(0, 30);
       return h + card("Workouts", recent.length ? '<div class="list">' + recent.map(function (w) {
         var run = w.type === "Run", pace = run ? paceOf(+w.miles, +w.minutes) : "";
-        return '<div class="item tap" data-act="editrun" data-id="' + w.id + '"><span class="time">' + shortDate(w.date) + '</span><div class="main"><div class="t">' + esc(run ? (w.kind || "Run") + " run" : w.type) + (run && +w.miles ? " · " + r1(w.miles) + " mi" : "") + '</div><div class="s">' + [w.minutes ? mmss(w.minutes * 60) : "", pace ? pace + " /mi" : "", w.rpe ? "effort " + w.rpe : "", esc(w.note || "")].filter(Boolean).join(" · ") + '</div></div></div>';
+        return '<div class="item tap" data-act="editrun" data-id="' + w.id + '"><span class="time">' + shortDate(w.date) + '</span><div class="main"><div class="t">' + esc(run ? (w.kind || "Run") + " run" : w.type) + (run && +w.miles ? " · " + r2(w.miles) + " mi" : "") + '</div><div class="s">' + [w.minutes ? mmss(w.minutes * 60) : "", pace ? pace + " /mi" : "", w.rpe ? "effort " + w.rpe : "", esc(w.note || "")].filter(Boolean).join(" · ") + '</div></div></div>';
       }).join("") + '</div>' : '<div class="empty">No workouts yet. Tap + to log your first run.</div>', linkBtn("Log", "newrun"));
     }
     var weeks = []; for (var k = 7; k >= 0; k--) { var s0 = ymd(addDays(mon, -7 * k)), pw = p && p.weeks.filter(function (w) { return w.start === s0; })[0]; weeks.push({ label: parse(s0).toLocaleDateString(undefined, { month: "numeric", day: "numeric" }), mi: weekMiles(s0), plan: pw ? pw.miles : 0 }); }
