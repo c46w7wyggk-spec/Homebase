@@ -122,6 +122,9 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .field > span { font-size: 13px; color: var(--muted); font-weight: 600; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.time3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.time3 input { text-align: center; }
+.pace-out { min-height: 44px; display: flex; align-items: center; font-weight: 700; font-variant-numeric: tabular-nums; font-size: 18px; }
 .toggle { display: flex; align-items: center; gap: 10px; font-size: 15px; }
 .toggle input { width: 22px; height: 22px; accent-color: var(--accent); flex: none; }
 .seg { display: flex; background: var(--surface2); border-radius: 12px; padding: 3px; gap: 3px; }
