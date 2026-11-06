@@ -581,9 +581,6 @@
       return '<div class="item"><button class="check' + (on ? " on" : "") + '" data-act="habit" data-id="' + g.id + '" data-date="' + t + '" aria-pressed="' + !!on + '" aria-label="' + esc(g.title) + '"></button><div class="main t">' + esc(g.title) + '</div><span class="pill' + (streak(g.id, set) ? "" : " muted") + '">' + streak(g.id, set) + 'd</span></div>';
     }).join("") + '</div>');
     h += learnTodayCard();
-    var tr = todaysReading();
-    h += card("Reading", tr ? '<div class="item"><button class="check' + (tr.done ? " on" : "") + '" data-act="readdone" aria-pressed="' + tr.done + '" aria-label="Mark reading done"></button><div class="main"><div class="t">' + esc(tr.text) + '</div><div class="s">' + (tr.done ? "Done today" : "Today's reading") + '</div></div></div>'
-      : '<div class="empty">Set up a reading plan to see today\'s passage here.</div>', linkBtn(tr ? "Reflect" : "Set up", tr ? "note" : "readsetup", ' data-date="' + t + '"'));
     return h;
   };
 
