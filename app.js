@@ -2,7 +2,7 @@
   "use strict";
 
   /* ================= utilities ================= */
-  var COLS = ["events", "meals", "grocery", "goals", "checkins", "prayers", "readings", "workouts", "weights", "settings"];
+  var COLS = ["events", "meals", "grocery", "goals", "checkins", "prayers", "readings", "workouts", "weights", "settings", "learn", "context"];
   var DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   var DAYS_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   var SLOTS = [["breakfast", "Breakfast"], ["lunch", "Lunch"], ["dinner", "Dinner"], ["snack", "Snack"]];
@@ -34,9 +34,10 @@
     goals: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>',
     faith: '<svg viewBox="0 0 24 24"><path d="M4 4h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4zM20 4h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6z"/></svg>',
     fitness: '<svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>',
+    learn: '<svg viewBox="0 0 24 24"><path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c0 1.5 2.7 3 6 3s6-1.5 6-3v-5M22 9v6"/></svg>',
     chev: '<svg class="chev" viewBox="0 0 24 24" width="18" height="18" style="stroke:currentColor;fill:none;stroke-width:2"><path d="M9 6l6 6-6 6"/></svg>'
   };
-  var TABS = [["today", "Today"], ["schedule", "Schedule"], ["goals", "Goals"], ["faith", "Faith"], ["fitness", "Fitness"]];
+  var TABS = [["today", "Today"], ["schedule", "Schedule"], ["goals", "Goals"], ["learn", "Learn"], ["fitness", "Fitness"]];
 
   /* ================= state ================= */
   var state = {}; COLS.forEach(function (c) { state[c] = []; });
@@ -579,6 +580,7 @@
       var on = set[g.id + "_" + t];
       return '<div class="item"><button class="check' + (on ? " on" : "") + '" data-act="habit" data-id="' + g.id + '" data-date="' + t + '" aria-pressed="' + !!on + '" aria-label="' + esc(g.title) + '"></button><div class="main t">' + esc(g.title) + '</div><span class="pill' + (streak(g.id, set) ? "" : " muted") + '">' + streak(g.id, set) + 'd</span></div>';
     }).join("") + '</div>');
+    h += learnTodayCard();
     var tr = todaysReading();
     h += card("Reading", tr ? '<div class="item"><button class="check' + (tr.done ? " on" : "") + '" data-act="readdone" aria-pressed="' + tr.done + '" aria-label="Mark reading done"></button><div class="main"><div class="t">' + esc(tr.text) + '</div><div class="s">' + (tr.done ? "Done today" : "Today's reading") + '</div></div></div>'
       : '<div class="empty">Set up a reading plan to see today\'s passage here.</div>', linkBtn(tr ? "Reflect" : "Set up", tr ? "note" : "readsetup", ' data-date="' + t + '"'));
@@ -795,6 +797,162 @@
     return h;
   };
 
+  /* ================= learn (Deep Daily) ================= */
+  // A short daily session: spaced review, predict, a lesson, a quiz, and a written explanation you grade yourself.
+  // Progress lives in one "learn/progress" item; the morning article is a "context/<date>" item written by a scheduled task.
+  var COURSE = window.HB_COURSE || { title: "Learn", blurb: "", lessons: [] };
+  var LBOX = [0, 1, 3, 7, 16, 35, 90];
+  function lessonOf(id) { for (var i = 0; i < COURSE.lessons.length; i++) if (COURSE.lessons[i].id === id) return COURSE.lessons[i]; return null; }
+  function cardOf(id) { var p = String(id).split("-"), l = lessonOf(p[0]), c = l && l.cards[+p[1]]; return c ? Object.assign({ id: id, lesson: l.id }, c) : null; }
+  function prog() {
+    var p = byId("learn", "progress"); p = p ? copy(p) : {};
+    p.cards = p.cards || {}; p.done = p.done || []; p.explains = p.explains || {}; p.streak = p.streak || 0; p.lastDay = p.lastDay || "";
+    return p;
+  }
+  function saveProg(p) { save("learn", "progress", p); }
+  function dueIds(p) { var t = today(); return Object.keys(p.cards).filter(function (k) { return p.cards[k].due <= t && cardOf(k); }); }
+  function nextLesson(p) { return COURSE.lessons.filter(function (l) { return p.done.indexOf(l.id) < 0; })[0] || null; }
+  function learnStreak(p) { return p.lastDay === today() || p.lastDay === ymd(addDays(new Date(), -1)) ? p.streak : 0; }
+  function shuffled(n) { var a = []; for (var i = 0; i < n; i++) a.push(i); for (var j = n - 1; j > 0; j--) { var k = Math.floor(Math.random() * (j + 1)), x = a[j]; a[j] = a[k]; a[k] = x; } return a; }
+  function latestContext() { return state.context.slice().sort(function (a, b) { return (a.date || "") < (b.date || "") ? 1 : -1; })[0] || null; }
+  function safeHref(u) { try { var x = new URL(u); return /^https?:$/.test(x.protocol) ? x.href : ""; } catch (e) { return ""; } }
+
+  function contextCard() {
+    var c = latestContext();
+    if (!c) return card("Daily context", '<div class="empty">A free article on the latest news lands here each morning.</div>');
+    var href = safeHref(c.url), l = c.lesson && lessonOf(c.lesson);
+    var b = '<div class="label">' + (c.date === today() ? "Today" : shortDate(c.date)) + (c.source ? " · " + esc(c.source) : "") + '</div><div class="ltitle">' + esc(c.title || "Today's article") + '</div>';
+    if (c.summary) b += '<p class="ltext">' + esc(c.summary) + '</p>';
+    if (c.why) b += '<p class="ltext lsub"><b>Why it matters:</b> ' + esc(c.why) + '</p>';
+    if (l) b += '<p class="ltext lsub">Connects to: <b>' + esc(l.title) + '</b></p>';
+    if (c.question) b += '<div class="lnote"><b>Read with this question:</b> ' + esc(c.question) + '</div>';
+    if (href) b += '<a class="btn block lbtnlink" href="' + esc(href) + '" target="_blank" rel="noopener">Read the article</a>';
+    return card("Daily context", b);
+  }
+
+  function learnTodayCard() {
+    var p = prog(), nl = nextLesson(p), due = dueIds(p).length, c = latestContext(), b;
+    if (p.lastDay === today()) b = '<div class="item"><span class="check on" aria-hidden="true"></span><div class="main"><div class="t">Done for today</div><div class="s">' + plural(learnStreak(p), "day") + ' in a row' + (nl ? " · next: " + esc(nl.title) : "") + '</div></div></div>';
+    else if (nl || due) b = '<div class="item tap" data-act="lstart"><div class="main"><div class="t">' + esc(nl ? nl.title : "Review day") + '</div><div class="s">' + [due ? plural(due, "review") : "", nl ? "new lesson" : "", "about 12 min"].filter(Boolean).join(" · ") + '</div></div>' + ICON.chev + '</div>';
+    else b = '<div class="empty">Course complete and nothing due. Nice work.</div>';
+    if (c && safeHref(c.url)) b += '<a class="item tap lrowlink" href="' + esc(safeHref(c.url)) + '" target="_blank" rel="noopener"><span class="pill muted">' + (c.date === today() ? "Today" : shortDate(c.date)) + '</span><div class="main"><div class="t">' + esc(c.title || "Today's article") + '</div><div class="s">' + esc(c.source || "Daily context") + '</div></div>' + ICON.chev + '</a>';
+    return card("Learn", '<div class="list">' + b + '</div>', linkBtn("Open", "goto", ' data-tab="learn"'));
+  }
+
+  function startLearn(mode) {
+    var p = prog(), due = dueIds(p), nl = mode === "review" ? null : nextLesson(p), steps = [];
+    shuffled(due.length).slice(0, 15).forEach(function (i) { steps.push({ type: "review", card: due[i] }); });
+    if (nl) {
+      steps.push({ type: "predict", lesson: nl.id }, { type: "learn", lesson: nl.id });
+      nl.cards.forEach(function (c, i) { steps.push({ type: "check", card: nl.id + "-" + i }); });
+      steps.push({ type: "explain", lesson: nl.id });
+    }
+    if (!steps.length) { toast("Nothing due. Come back tomorrow."); return false; }
+    steps.push({ type: "done" });
+    ui.L = { steps: steps, si: 0, right: 0, total: 0, lesson: nl ? nl.id : null, retried: {} };
+    return true;
+  }
+  function learnPick(i) {
+    var L = ui.L, st = L && L.steps[L.si]; if (!st || st.pick != null) return;
+    st.pick = i;
+    if (st.type === "predict") return;
+    var ok = i === 0;
+    if (st.type === "retry") return;
+    L.total++; if (ok) L.right++;
+    var p = prog(), c = p.cards[st.card] || { box: 0 };
+    c.box = ok ? Math.min((c.box || 0) + 1, LBOX.length - 1) : 1;
+    c.due = ymd(addDays(new Date(), LBOX[c.box]));
+    p.cards[st.card] = c; saveProg(p);
+    if (!ok && !L.retried[st.card]) { L.retried[st.card] = 1; L.steps.splice(L.steps.length - 1, 0, { type: "retry", card: st.card }); }
+  }
+  function learnNext() {
+    var L = ui.L; if (!L) return;
+    L.si++;
+    var st = L.steps[L.si];
+    if (!st) ui.L = null;
+    else if (st.type === "done") {
+      var p = prog(), t = today();
+      if (L.lesson && p.done.indexOf(L.lesson) < 0) p.done.push(L.lesson);
+      if (p.lastDay !== t) { p.streak = p.lastDay === ymd(addDays(new Date(), -1)) ? p.streak + 1 : 1; p.lastDay = t; }
+      saveProg(p); if (navigator.vibrate) navigator.vibrate(10);
+    }
+    render(true); window.scrollTo(0, 0);
+  }
+  function learnRate(v) {
+    var L = ui.L, st = L.steps[L.si], p = prog();
+    p.explains[st.lesson] = { text: st.text || "", score: v, day: today() }; saveProg(p);
+    learnNext();
+  }
+  function learnResetSheet() {
+    openSheet({ title: "Reset Learn progress", html: '<p class="ltext" style="margin:0">This erases your lesson progress, review schedule and streak. Your other Homebase data stays.</p>' + sbtn("Erase my Learn progress", "erase", "danger"),
+      actions: { erase: function () { del("learn", "progress"); ui.L = null; toast("Learn progress erased"); } } });
+  }
+
+  function qHtml(st, q, label, sub) {
+    if (!st.order) st.order = shuffled(q.opts.length);
+    var done = st.pick != null;
+    return '<span class="lphase">' + label + '</span>' + (sub ? '<div class="lsub">' + sub + '</div>' : "") + '<h2 class="lq">' + esc(q.q) + '</h2>' +
+      st.order.map(function (i) { return '<button class="opt' + (done ? (i === 0 ? " right" : i === st.pick ? " wrong" : "") : "") + '" data-act="lpick" data-i="' + i + '"' + (done ? " disabled" : "") + '>' + esc(q.opts[i]) + '</button>'; }).join("");
+  }
+  function learnStep() {
+    var L = ui.L, st = L.steps[L.si], n = L.steps.length, h;
+    h = '<div class="lhead"><button class="icon-btn" data-act="lclose" aria-label="Close session"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button><div class="bar"><i style="width:' + Math.round(100 * L.si / Math.max(1, n - 1)) + '%"></i></div></div>';
+    if (st.type === "review" || st.type === "check" || st.type === "retry") {
+      var c = cardOf(st.card);
+      if (!c) { L.steps.splice(L.si, 1); return learnStep(); }
+      h += '<section class="card">' + qHtml(st, c, st.type === "review" ? "Warm-up review" : st.type === "retry" ? "One more try" : "Check what you learned", st.type === "review" ? "From: " + esc(lessonOf(c.lesson).title) : "");
+      if (st.pick != null) h += '<div class="fb ' + (st.pick === 0 ? "good" : "bad") + '"><b>' + (st.pick === 0 ? "Right." : "Not quite.") + '</b> ' + esc(c.why) + '</div><button class="btn primary block" data-act="lnext">Continue</button>';
+      return h + '</section>';
+    }
+    var l = lessonOf(st.lesson);
+    if (st.type === "predict") {
+      h += '<section class="card">' + qHtml(st, l.predict, "Predict first", "New lesson: " + esc(l.title) + ". Take your best guess. Wrong guesses still help.");
+      if (st.pick != null) h += '<div class="fb neutral"><b>' + (st.pick === 0 ? "Good instinct." : "Now you'll remember it.") + '</b> ' + esc(l.predict.why) + '</div><button class="btn primary block" data-act="lnext">Read the lesson</button>';
+      return h + '</section>';
+    }
+    if (st.type === "learn") {
+      h += '<section class="card"><span class="lphase">' + (st.reread ? "Re-read" : "Learn") + '</span><h2 class="ltitle big">' + esc(l.title) + '</h2><div class="lsub">' + esc(l.era) + '</div><div class="story">' + l.story.map(function (p) { return '<p>' + esc(p) + '</p>'; }).join("") + '</div>';
+      if (l.views) h += '<div class="label" style="margin:16px 0 6px">How each side tells it</div><div class="lview a"><div class="label">Israeli narrative</div>' + esc(l.views.a) + '</div><div class="lview b"><div class="label">Palestinian narrative</div>' + esc(l.views.b) + '</div>';
+      if (l.note) h += '<div class="lnote">' + esc(l.note) + '</div>';
+      return h + '<button class="btn primary block" style="margin-top:16px" data-act="lnext">' + (st.reread ? "Done" : "I've got it. Quiz me") + '</button></section>';
+    }
+    if (st.type === "explain") {
+      h += '<section class="card"><span class="lphase">Explain it</span><h2 class="lq">' + esc(l.explain.q) + '</h2>' +
+        '<textarea id="lexpl" rows="6" placeholder="Write 2–4 sentences in your own words…"' + (st.revealed ? " readonly" : "") + '>' + esc(st.text || "") + '</textarea>';
+      if (!st.revealed) h += '<button class="btn primary block" style="margin-top:10px" data-act="lreveal">Compare with the model answer</button>';
+      else h += '<div class="fb neutral"><b>Model answer:</b> ' + esc(l.explain.model) + '</div><div class="lsub" style="margin:12px 0 8px">How close were you?</div><div class="grid3"><button class="btn" data-act="lrate" data-v="1">Missed it</button><button class="btn" data-act="lrate" data-v="2">Partly</button><button class="btn" data-act="lrate" data-v="3">Nailed it</button></div>';
+      return h + '</section>';
+    }
+    var p = prog(), tm = ymd(addDays(new Date(), 1)), tomorrow = Object.keys(p.cards).filter(function (k) { return p.cards[k].due <= tm; }).length;
+    h += '<section class="card ldone"><div class="ldone-check">✓</div><h2 class="ltitle big">Session complete</h2><div class="lsub">' + L.right + '/' + L.total + ' correct · ' + plural(learnStreak(p), "day") + ' in a row</div>' +
+      (L.lesson ? '<div class="lsub">Learned: ' + esc(lessonOf(L.lesson).title) + '</div>' : "") + '<div class="lsub">' + plural(tomorrow, "review") + ' waiting tomorrow</div></section>';
+    return h + contextCard() + '<button class="btn primary block" data-act="lnext">Back to Learn</button>';
+  }
+
+  views.learn = function () {
+    if (ui.L && ui.L.steps[ui.L.si]) return learnStep();
+    ui.L = null;
+    var p = prog(), nl = nextLesson(p), due = dueIds(p).length, mastered = Object.keys(p.cards).filter(function (k) { return p.cards[k].box >= 4; }).length, h, tb;
+    h = '<div class="hero"><div class="eyebrow">Deep Daily</div><div class="big">' + esc(COURSE.title) + '</div><div class="where">' + esc(COURSE.blurb || "") + '</div></div>';
+    h += '<section class="card"><div class="stats"><div class="stat"><b>' + learnStreak(p) + '</b><span>day streak</span></div><div class="stat"><b>' + p.done.length + '/' + COURSE.lessons.length + '</b><span>lessons</span></div><div class="stat"><b>' + mastered + '</b><span>facts mastered</span></div></div></section>';
+    if (p.lastDay !== today()) tb = '<div class="ltitle">' + esc(nl ? nl.title : due ? "Review day" : "All caught up") + '</div><div class="lsub" style="margin-bottom:12px">' + ([due ? plural(due, "review") : "", nl ? "1 new lesson · 1 explanation" : ""].filter(Boolean).join(" · ") || "Nothing due today.") + '</div>' + (nl || due ? '<button class="btn primary block" data-act="lstart">Start today\'s session</button>' : "");
+    else tb = '<div class="ltitle">Done for today ✓</div><div class="lsub" style="margin-bottom:12px">Stopping here is part of the method: spacing helps it stick.</div>' + (nl ? '<button class="btn block" data-act="lstart" data-mode="extra">Keep going: ' + esc(nl.title) + '</button>' : "") + (due ? '<button class="btn block" style="margin-top:8px" data-act="lstart" data-mode="review">Review ' + plural(due, "card") + '</button>' : "");
+    h += card("Today · about 12 minutes", tb);
+    h += contextCard();
+    h += card("Course map", '<div class="list">' + COURSE.lessons.map(function (l, i) {
+      var isDone = p.done.indexOf(l.id) >= 0, isNext = nl && nl.id === l.id;
+      return '<div class="item"><span class="ldot' + (isDone ? " done" : isNext ? " next" : "") + '">' + (isDone ? "✓" : i + 1) + '</span><div class="main"><div class="t">' + esc(l.title) + '</div><div class="s">' + esc(l.era) + '</div></div>' + (isDone ? '<button class="lbtn" data-act="lread" data-id="' + l.id + '">Re-read</button>' : "") + '</div>';
+    }).join("") + '</div>');
+    h += card("How this works", '<p class="ltext">Each session uses the methods with the strongest evidence for long-term learning.</p>' +
+      '<p class="ltext"><b>Retrieval practice.</b> You answer before you\'re shown. Pulling a fact from memory strengthens it far more than rereading.</p>' +
+      '<p class="ltext"><b>Spaced repetition.</b> Facts come back after 1, 3, 7, 16, 35, then 90 days. A miss brings it back tomorrow.</p>' +
+      '<p class="ltext"><b>Prediction.</b> Guessing before the lesson, even wrongly, makes the answer stick.</p>' +
+      '<p class="ltext"><b>Elaboration.</b> Explaining "why" in your own words builds understanding. Compare honestly with the model answer.</p>');
+    h += card("Go deeper", '<p class="ltext">Read across perspectives:</p><div class="list">' + [["Righteous Victims", "Benny Morris · Israeli historian"], ["The Hundred Years' War on Palestine", "Rashid Khalidi · Palestinian-American historian"], ["Letters to My Palestinian Neighbor", "Yossi Klein Halevi · Israeli personal view"], ["Palestinian Walks", "Raja Shehadeh · Palestinian personal view"], ["Enemies and Neighbours", "Ian Black · British journalist, even-handed survey"]].map(function (x) { return '<div class="item"><div class="main"><div class="t"><i>' + x[0] + '</i></div><div class="s">' + x[1] + '</div></div></div>'; }).join("") + '</div>' +
+      '<button class="btn danger block" style="margin-top:12px" data-act="lreset">Reset Learn progress</button>');
+    return h;
+  };
+
   /* ================= render ================= */
   var view = $("view"), lastHtml = "", lastTab = "";
   function current() { var hsh = location.hash.replace("#", ""); return views[hsh] && TABS.some(function (x) { return x[0] === hsh; }) ? hsh : "today"; }
@@ -806,7 +964,8 @@
     var tab = current();
     if (tab !== lastTab) {
       $("tabs").innerHTML = TABS.map(function (t) { return '<a href="#' + t[0] + '"' + (t[0] === tab ? ' aria-current="page"' : "") + '>' + ICON[t[0]] + t[1] + '</a>'; }).join("");
-      $("title").textContent = { today: "Today", schedule: "Schedule", meals: "Meals", goals: "Goals", faith: "Faith", fitness: "Fitness" }[tab];
+      $("title").textContent = { today: "Today", schedule: "Schedule", meals: "Meals", goals: "Goals", faith: "Faith", learn: "Learn", fitness: "Fitness" }[tab];
+      $("fab").hidden = tab === "learn";
     }
     var html = views[tab]();
     if (html !== lastHtml || tab !== lastTab) { view.innerHTML = html; lastHtml = html; }
@@ -852,7 +1011,18 @@
       case "newweight": weightSheet(); break;
       case "editweight": weightDetail(b.dataset.id); break;
       case "wrange": ui.wRange = b.dataset.v; render(true); break;
+      case "lstart": if (startLearn(b.dataset.mode)) { if (current() !== "learn") location.hash = "learn"; else { render(true); window.scrollTo(0, 0); } } break;
+      case "lpick": learnPick(+b.dataset.i); render(true); break;
+      case "lnext": learnNext(); break;
+      case "lclose": ui.L = null; render(true); window.scrollTo(0, 0); break;
+      case "lread": ui.L = { steps: [{ type: "learn", lesson: id, reread: true }], si: 0, right: 0, total: 0, lesson: null, retried: {} }; render(true); window.scrollTo(0, 0); break;
+      case "lreveal": var lst = ui.L.steps[ui.L.si]; lst.revealed = true; render(true); break;
+      case "lrate": learnRate(+b.dataset.v); break;
+      case "lreset": learnResetSheet(); break;
     }
+  });
+  view.addEventListener("input", function (ev) {
+    if (ev.target.id === "lexpl" && ui.L && ui.L.steps[ui.L.si]) ui.L.steps[ui.L.si].text = ev.target.value;
   });
   view.addEventListener("submit", function (ev) {
     if (ev.target.id !== "gform") return;
@@ -897,7 +1067,7 @@
     if (tab === "fitness") return runSheet();
     if (tab === "goals") return quickMenu([["Habit", function () { habitSheet(); }], ["Goal", function () { goalSheet(); }]]);
     if (tab === "meals") return quickMenu([["Meal today", function () { mealSheet(today(), new Date().getHours() < 11 ? "breakfast" : new Date().getHours() < 16 ? "lunch" : "dinner"); }], ["Grocery item", function () { var el = $("gtext"); if (el) el.focus(); }]]);
-    quickMenu([["Event", function () { eventSheet(null, today()); }], ["Workout", function () { runSheet(); }], ["Prayer request", function () { prayerSheet(); }], ["Habit", function () { habitSheet(); }], ["Goal", function () { goalSheet(); }]]);
+    quickMenu([["Event", function () { eventSheet(null, today()); }], ["Workout", function () { runSheet(); }], ["Habit", function () { habitSheet(); }], ["Goal", function () { goalSheet(); }]]);
   });
   $("settings-btn").addEventListener("click", settingsSheet);
 
