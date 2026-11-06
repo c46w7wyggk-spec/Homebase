@@ -1,6 +1,6 @@
 # Homebase
 
-One installable app for schedule, meals, goals, faith, and running.
+One installable app for schedule, meals, goals, learning, and running.
 
 - **Front end:** plain HTML, CSS and JavaScript. No build step.
 - **Data:** Supabase (Postgres with row-level security). Each user only sees their own rows.
@@ -9,6 +9,7 @@ One installable app for schedule, meals, goals, faith, and running.
 
 ## Files
 - `index.html`, `style.css`, `app.js`: the app
+- `course.js`: lessons for the Learn tab (Deep Daily). Progress is saved as the `learn/progress` item; the morning article is a `context/<date>` item written by a scheduled task
 - `config.js`: Supabase URL and publishable key (safe to publish; row-level security protects the data)
 - `sw.js`, `manifest.webmanifest`, `icons/`: install and offline support
 - `vendor/supabase.js`: pinned copy of supabase-js 2.45.4
