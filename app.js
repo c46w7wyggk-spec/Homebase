@@ -800,7 +800,14 @@
   /* ================= learn (Deep Daily) ================= */
   // A short daily session: spaced review, predict, a lesson, a quiz, and a written explanation you grade yourself.
   // Progress lives in one "learn/progress" item; the morning article is a "context/<date>" item written by a scheduled task.
-  var COURSE = window.HB_COURSE || { title: "Learn", blurb: "", lessons: [] };
+  var COURSE = window.HB_COURSE || { title: "Learn", blurb: "Loading lessons…", lessons: [] };
+  // If a cached older index.html left out the course script, load it here so the Learn tab never comes up empty.
+  if (!window.HB_COURSE) {
+    var cs = document.createElement("script"); cs.src = "course.js?v=" + Date.now();
+    cs.onload = function () { if (window.HB_COURSE) { COURSE = window.HB_COURSE; lastHtml = ""; render(true); } };
+    cs.onerror = function () { COURSE.blurb = "Couldn't load the lessons. Check your connection and reopen the app."; lastHtml = ""; render(true); };
+    document.head.appendChild(cs);
+  }
   var LBOX = [0, 1, 3, 7, 16, 35, 90];
   function lessonOf(id) { for (var i = 0; i < COURSE.lessons.length; i++) if (COURSE.lessons[i].id === id) return COURSE.lessons[i]; return null; }
   function cardOf(id) { var p = String(id).split("-"), l = lessonOf(p[0]), c = l && l.cards[+p[1]]; return c ? Object.assign({ id: id, lesson: l.id }, c) : null; }
