@@ -36,11 +36,11 @@
     fitness: '<svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>',
     chev: '<svg class="chev" viewBox="0 0 24 24" width="18" height="18" style="stroke:currentColor;fill:none;stroke-width:2"><path d="M9 6l6 6-6 6"/></svg>'
   };
-  var TABS = [["today", "Today"], ["schedule", "Schedule"], ["goals", "Goals"], ["faith", "Faith"], ["fitness", "Run"]];
+  var TABS = [["today", "Today"], ["schedule", "Schedule"], ["goals", "Goals"], ["faith", "Faith"], ["fitness", "Fitness"]];
 
   /* ================= state ================= */
   var state = {}; COLS.forEach(function (c) { state[c] = []; });
-  var ui = { schedDate: today(), mealWeek: 0, planWeek: 0, fit: "plan" };
+  var ui = { schedDate: today(), mealWeek: 0, planWeek: 0, fit: "stats" };
   function byId(c, id) { for (var i = 0; i < state[c].length; i++) if (state[c][i].id === id) return state[c][i]; return null; }
   function setting(id) { return byId("settings", id) || {}; }
   function copy(o) { return JSON.parse(JSON.stringify(o)); }
@@ -548,10 +548,48 @@
     return h + '<button class="nav" data-act="' + act + '" data-date="' + ymd(addDays(mon, 7)) + '" aria-label="Next week">›</button></div>';
   }
 
+
+  function mins(t) { var p = t.split(":"); return +p[0] * 60 + (+p[1] || 0); }
+  function weekGrid(sel) {
+    var mon = mondayOf(parse(sel)), t = today(), HP = 30, days = [], lo = 1440, hi = 0, allday = false;
+    for (var i = 0; i < 7; i++) {
+      var d = addDays(mon, i), ds = ymd(d), evs = eventsOn(ds);
+      evs.forEach(function (e) { if (!e.time) { allday = true; return; } var a = mins(e.time), b = e.end ? mins(e.end) : a + 60; if (b <= a) b = Math.min(1440, a + 60); lo = Math.min(lo, a); hi = Math.max(hi, b); });
+      days.push({ ds: ds, d: d, evs: evs });
+    }
+    if (lo > hi) { lo = 480; hi = 1080; }
+    var h0 = Math.floor(lo / 60), h1 = Math.min(24, Math.ceil(hi / 60)); if (h1 - h0 < 6) h1 = Math.min(24, h0 + 6); if (h1 - h0 < 6) h0 = h1 - 6;
+    var H = (h1 - h0) * HP, sun = addDays(mon, 6);
+    var label = shortDate(ymd(mon)) + " – " + shortDate(ymd(sun)), thisWk = ymd(mondayOf(new Date())) === ymd(mon);
+    var h = '<div class="wk-nav"><button class="btn ghost" data-act="sday" data-date="' + ymd(addDays(parse(sel), -7)) + '" aria-label="Previous week">‹</button><div class="grow"><b>' + label + '</b><small>' + (thisWk ? "This week" : ymd(mon) > t ? "Upcoming" : "Past") + '</small></div>' +
+      (thisWk ? "" : '<button class="link" data-act="sday" data-date="' + t + '">Today</button>') + '<button class="btn ghost" data-act="sday" data-date="' + ymd(addDays(parse(sel), 7)) + '" aria-label="Next week">›</button></div>';
+    h += '<div class="wk"><div class="wk-head"><span></span>' + days.map(function (x) { return '<button data-act="sday" data-date="' + x.ds + '" class="' + (x.ds === sel ? "sel " : "") + (x.ds === t ? "today" : "") + '"><small>' + DAYS[x.d.getDay()].slice(0, 1) + '</small><b>' + x.d.getDate() + '</b></button>'; }).join("") + '</div>';
+    if (allday) h += '<div class="wk-all"><span>all day</span>' + days.map(function (x) { var a = x.evs.filter(function (e) { return !e.time; }); return '<div>' + a.map(function (e) { return '<i class="' + (e.ref ? "ref" : "") + '" data-act="editev" data-id="' + e.id + '" data-date="' + x.ds + '" title="' + esc(e.title) + '">' + esc(e.title) + '</i>'; }).join("") + '</div>'; }).join("") + '</div>';
+    h += '<div class="wk-body" style="height:' + H + 'px"><div class="wk-hours">';
+    for (var hr = h0; hr < h1; hr++) h += '<span style="top:' + (hr - h0) * HP + 'px">' + pad(hr) + '</span><u style="top:' + (hr - h0) * HP + 'px"></u>';
+    h += '</div>';
+    days.forEach(function (x) {
+      var timed = x.evs.filter(function (e) { return e.time; }).map(function (e) { var a = mins(e.time), b = e.end ? mins(e.end) : a + 60; if (b <= a) b = Math.min(1440, a + 60); return { e: e, a: a, b: b, lane: 0, n: 1 }; }).sort(function (p, q) { return p.a - q.a || p.b - q.b; });
+      var cl = [], cEnd = -1;
+      timed.forEach(function (o) { if (o.a >= cEnd) { cl = []; cl.push([]); cEnd = o.b; } else cEnd = Math.max(cEnd, o.b); var lanes = cl[0], ln = 0; while (lanes.length > ln && lanes[ln] > o.a) ln++; lanes[ln] = o.b; o.lane = ln; o.group = cl; });
+      timed.forEach(function (o) { o.n = o.group[0].length; });
+      h += '<div class="wk-col' + (x.ds === sel ? " sel" : "") + '" data-act="sday" data-date="' + x.ds + '">';
+      timed.forEach(function (o) {
+        var top = (o.a - h0 * 60) * HP / 60, ht = Math.max(14, (o.b - o.a) * HP / 60 - 1);
+        h += '<button class="wk-ev' + (o.e.ref ? " ref" : "") + '" style="top:' + top + 'px;height:' + ht + 'px;left:' + (100 * o.lane / o.n) + '%;width:' + (100 / o.n) + '%" data-act="editev" data-id="' + o.e.id + '" data-date="' + x.ds + '" title="' + esc(o.e.title) + ' ' + time24(o.e.time) + '">' + (o.n === 1 ? esc(o.e.title) : "") + '</button>';
+      });
+      h += '</div>';
+    });
+    var now = new Date(), nm = now.getHours() * 60 + now.getMinutes();
+    if (days.some(function (x) { return x.ds === t; }) && nm >= h0 * 60 && nm <= h1 * 60) h += '<div class="wk-now" style="top:' + (nm - h0 * 60) * HP / 60 + 'px"></div>';
+    return h + '</div></div>';
+  }
+
   views.schedule = function () {
     var sel = ui.schedDate, evs = eventsOn(sel), t = today();
-    var h = '<section class="card">' + strip(sel, "sday", function (ds) { return eventsOn(ds).length; }) + '</section>';
-    h += card(sel === t ? "Today" : longDate(sel), evs.length ? '<div class="list">' + evs.map(function (e) { return eventRow(e, sel); }).join("") + '</div>' : '<div class="empty">Nothing on this day.</div>',
+    var h = '<section class="card wkcard">' + weekGrid(sel) + '</section>';
+    var timedEv = evs.filter(function (e) { return e.time; }), span = timedEv.length ? time24(timedEv[0].time) + "–" + time24(timedEv.reduce(function (m, e) { var en = e.end || e.time; return en > m ? en : m; }, "00:00")) : "";
+    h += card(sel === t ? "Today" : longDate(sel), (evs.length ? '<p class="s" style="margin:-4px 0 8px;color:var(--muted);font-size:13px">' + plural(evs.length, "event") + (span ? " · " + span : "") + '</p>' : "") + (evs.length ? '<div class="list">' + evs.map(function (e) { return eventRow(e, sel); }).join("") + '</div>' : '<div class="empty">Nothing on this day.</div>'),
       sel !== t ? linkBtn("Jump to today", "sday", ' data-date="' + t + '"') : "");
     var mon = mondayOf(parse(sel)), n = 0;
     for (var i = 0; i < 7; i++) n += eventsOn(ymd(addDays(mon, i))).filter(function (e) { return !e.ref; }).length;
@@ -629,8 +667,34 @@
     return s + '</svg>';
   }
 
+
+  function weekSummary() {
+    var mon = mondayOf(new Date()), ms = ymd(mon), me = ymd(addDays(mon, 6)), t = today(), p = plan();
+    var wk = state.workouts.filter(function (w) { return w.date >= ms && w.date <= me; });
+    var runs = wk.filter(function (w) { return w.type === "Run"; }), other = wk.filter(function (w) { return w.type !== "Run"; });
+    var mi = weekMiles(ms), min = runs.reduce(function (a, w) { return a + (+w.minutes || 0); }, 0);
+    var prev = weekMiles(ymd(addDays(mon, -7))), four = 0;
+    for (var k = 1; k <= 4; k++) four += weekMiles(ymd(addDays(mon, -7 * k))) / 4;
+    var pw = p && p.weeks.filter(function (w) { return w.start === ms; })[0], toDate = 0;
+    if (p) for (var i = 0; i < 7; i++) { var ds = ymd(addDays(mon, i)); if (ds <= t && p.days[ds]) toDate += +p.days[ds].miles || 0; }
+    var L = [];
+    if (!wk.length) L.push("Nothing logged yet this week" + (pw ? ", with " + r1(pw.miles) + " miles planned." : "."));
+    else {
+      var line = runs.length ? plural(runs.length, "run") + " for " + r1(mi) + " mi" + (min ? " in " + Math.round(min) + " min" : "") : "";
+      var pace = mi && min ? paceOf(mi, min) : "";
+      if (line) L.push(line + (pace ? ", averaging " + pace + " /mi." : "."));
+      if (other.length) L.push(plural(other.length, "other session") + " (" + other.map(function (w) { return w.type.toLowerCase(); }).join(", ") + ").");
+      var rp = runs.filter(function (w) { return +w.rpe > 0; });
+      if (rp.length) L.push("Average effort " + r1(rp.reduce(function (a, w) { return a + +w.rpe; }, 0) / rp.length) + " out of 10.");
+    }
+    if (toDate) { var diff = r1(mi - toDate); L.push(Math.abs(diff) < 0.5 ? "Right on plan so far (" + r1(toDate) + " mi planned to date)." : Math.abs(diff) + " mi " + (diff > 0 ? "ahead of" : "behind") + " plan so far (" + r1(toDate) + " mi planned to date)."); }
+    if (prev > 0 || four > 0) { var bits = []; if (prev > 0) { var d = r1(mi - prev); bits.push((d >= 0 ? "up " : "down ") + Math.abs(d) + " mi on last week"); } if (four > 0) bits.push("4-week average is " + r1(four) + " mi"); L.push("Trend: " + bits.join("; ") + "."); }
+    if (p) for (var j = 0; j < 8; j++) { var nd = ymd(addDays(new Date(), j)), it = p.days[nd]; if (it && it.type !== "rest" && (j > 0 || !runsOn(nd).some(function (w) { return w.type === "Run"; }))) { L.push("Next up: " + (j === 0 ? "today" : j === 1 ? "tomorrow" : DAYS_LONG[parse(nd).getDay()]) + ", " + esc(it.title || it.type) + (it.miles ? " (" + r1(it.miles) + " mi)" : "") + "."); break; } }
+    return card("This week", '<p style="margin:0;line-height:1.5">' + L.join(" ") + '</p><p class="s" style="margin:8px 0 0;color:var(--muted);font-size:12px">Summary written from your logged workouts and plan.</p>');
+  }
+
   views.fitness = function () {
-    var h = '<div class="seg" role="tablist">' + [["plan", "Plan"], ["log", "Log"], ["stats", "Stats"]].map(function (s) { return '<button role="tab" class="' + (ui.fit === s[0] ? "on" : "") + '" data-act="fit" data-v="' + s[0] + '">' + s[1] + '</button>'; }).join("") + '</div>';
+    var h = '<div class="seg" role="tablist">' + [["stats", "Stats"], ["log", "Log"], ["plan", "Plan"]].map(function (s) { return '<button role="tab" class="' + (ui.fit === s[0] ? "on" : "") + '" data-act="fit" data-v="' + s[0] + '">' + s[1] + '</button>'; }).join("") + '</div>';
     var p = plan(), t = today(), mon = mondayOf(new Date());
     if (ui.fit === "plan") {
       if (!p) return h + card("Training plan", '<div class="empty">No plan yet. Ask Claude in chat and it will build one for you.</div>');
@@ -661,6 +725,7 @@
     var longest = runs.reduce(function (a, w) { return Math.max(a, +w.miles); }, 0);
     var best = runs.filter(function (w) { return +w.miles >= 3 && +w.minutes > 0; }).sort(function (a, b) { return a.minutes / a.miles - b.minutes / b.miles; })[0];
     var total30 = runs.filter(function (w) { return w.date >= ymd(addDays(new Date(), -30)); }).reduce(function (a, w) { return a + +w.miles; }, 0);
+    h += weekSummary();
     h += card("Mileage", '<div class="stats" style="margin-bottom:10px"><div class="stat"><b>' + r1(weekMiles(ymd(mon))) + '</b><span>this week</span></div><div class="stat"><b>' + r1(total30) + '</b><span>last 30 days</span></div><div class="stat"><b>' + (longest ? r1(longest) : "–") + '</b><span>longest run</span></div></div>' + chart(weeks) +
       '<p class="s" style="margin:6px 0 0;color:var(--muted);font-size:13px">' + (p ? "Dashed outline shows planned miles. " : "") + (best ? "Fastest 3+ mile run: " + paceOf(+best.miles, +best.minutes) + " /mi on " + shortDate(best.date) + "." : "") + '</p>');
     h += weightCard();
@@ -678,7 +743,7 @@
     var tab = current();
     if (tab !== lastTab) {
       $("tabs").innerHTML = TABS.map(function (t) { return '<a href="#' + t[0] + '"' + (t[0] === tab ? ' aria-current="page"' : "") + '>' + ICON[t[0]] + t[1] + '</a>'; }).join("");
-      $("title").textContent = { today: "Today", schedule: "Schedule", meals: "Meals", goals: "Goals", faith: "Faith", fitness: "Running" }[tab];
+      $("title").textContent = { today: "Today", schedule: "Schedule", meals: "Meals", goals: "Goals", faith: "Faith", fitness: "Fitness" }[tab];
     }
     var html = views[tab]();
     if (html !== lastHtml || tab !== lastTab) { view.innerHTML = html; lastHtml = html; }

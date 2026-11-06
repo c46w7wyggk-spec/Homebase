@@ -181,3 +181,29 @@ svg.chart text { fill: var(--muted); font-family: var(--font-body); font-size: 1
 .type.tempo, .type.intervals, .type.pace { background: var(--good-soft); color: var(--good); }
 
 @media (prefers-reduced-motion: reduce) { .sheet, .scrim, .toast, .tap, .check { transition: none; } }
+
+/* week grid */
+.wkcard { padding: 12px 10px 10px; }
+.wk-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.wk-nav .grow { text-align: center; display: flex; flex-direction: column; line-height: 1.2; }
+.wk-nav small { color: var(--muted); font-size: 12px; }
+.wk { --gut: 26px; }
+.wk-head { display: grid; grid-template-columns: var(--gut) repeat(7, 1fr); gap: 2px; margin-bottom: 4px; }
+.wk-head button { border: 0; background: transparent; border-radius: 10px; padding: 4px 0; display: flex; flex-direction: column; align-items: center; gap: 1px; color: var(--muted); cursor: pointer; font: inherit; }
+.wk-head small { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+.wk-head b { font-size: 15px; color: var(--fg); font-variant-numeric: tabular-nums; }
+.wk-head button.sel { background: var(--accent); }
+.wk-head button.sel small, .wk-head button.sel b { color: var(--accent-fg); }
+.wk-head button.today:not(.sel) b { color: var(--accent); }
+.wk-all { display: grid; grid-template-columns: var(--gut) repeat(7, 1fr); gap: 2px; margin-bottom: 4px; font-size: 9px; color: var(--muted); }
+.wk-all i { display: block; font-style: normal; background: var(--accent); color: var(--accent-fg); border-radius: 4px; padding: 1px 3px; margin-bottom: 1px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer; }
+.wk-all i.ref { background: var(--surface2); color: var(--muted); }
+.wk-body { position: relative; display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; padding-left: var(--gut); }
+.wk-hours { position: absolute; inset: 0; pointer-events: none; }
+.wk-hours span { position: absolute; left: 0; font-size: 9px; color: var(--muted); transform: translateY(-5px); font-variant-numeric: tabular-nums; }
+.wk-hours u { position: absolute; left: var(--gut); right: 0; border-top: 1px solid var(--line); }
+.wk-col { position: relative; border-radius: 6px; cursor: pointer; }
+.wk-col.sel { background: var(--accent-soft); }
+.wk-ev { position: absolute; border: 0; border-radius: 5px; padding: 2px 3px; font: inherit; font-size: 9.5px; line-height: 1.1; font-weight: 600; text-align: left; overflow: hidden; background: var(--accent); color: var(--accent-fg); cursor: pointer; box-shadow: 0 0 0 1px var(--bg); word-break: break-word; }
+.wk-ev.ref { background: var(--good-soft); color: var(--good); }
+.wk-now { position: absolute; left: var(--gut); right: 0; border-top: 2px solid var(--warn, #c0392b); pointer-events: none; }
