@@ -242,6 +242,7 @@
   function openSheet(cfg) {
     sheetCfg = cfg;
     $("sheet-title").textContent = cfg.title;
+    $("sheet-edit").hidden = !cfg.edit;
     $("sheet-body").innerHTML = cfg.html;
     $("scrim").hidden = false; $("sheet").hidden = false;
     requestAnimationFrame(function () { $("scrim").classList.add("open"); $("sheet").classList.add("open"); });
@@ -255,6 +256,7 @@
   }
   $("scrim").addEventListener("click", closeSheet);
   $("sheet-close").addEventListener("click", closeSheet);
+  $("sheet-edit").addEventListener("click", function () { if (sheetCfg && sheetCfg.edit) sheetCfg.edit(); });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeSheet(); });
   $("sheet-body").addEventListener("submit", function (ev) {
     ev.preventDefault();
@@ -478,6 +480,50 @@
     });
   }
 
+
+  /* ================= detail views (tap opens these; pencil opens the editor) ================= */
+  function drow(label, val) { return val === "" || val == null ? "" : '<div class="drow"><span>' + label + '</span><div>' + val + '</div></div>'; }
+  function dlist(rows) { return '<div class="dlist">' + rows.join("") + '</div>'; }
+  function eventDetail(id, ds) {
+    var e = byId("events", id); if (!e) return;
+    var on = ds || e.date, rep = { daily: "Every day", weekdays: "Weekdays", weekly: "Every " + DAYS_LONG[parse(e.date).getDay()] }[e.repeat] || "";
+    var when = longDate(on) + (e.time ? " · " + time24(e.time) + (e.end ? "–" + time24(e.end) : "") : " · All day");
+    var dur = e.time && e.end ? mins(e.end) - mins(e.time) : 0;
+    openSheet({
+      title: e.title, edit: function () { eventSheet(id, ds); },
+      html: dlist([drow("When", esc(when)), drow("Length", dur > 0 ? (dur >= 60 ? Math.floor(dur / 60) + "h" + (dur % 60 ? " " + dur % 60 + "m" : "") : dur + "m") : ""), drow("Where", esc(e.place || "")),
+        drow("Repeats", rep ? esc(rep) + (e.until ? " until " + shortDate(e.until) : "") : ""), drow("Calendar", e.ref ? "Already in your calendar" : "Included in the .ics export"),
+        drow("Notes", e.notes ? esc(e.notes).replace(/\n/g, "<br>") : "")])
+    });
+  }
+  function runDetail(id) {
+    var w = byId("workouts", id); if (!w) return;
+    var run = w.type === "Run", pace = run ? paceOf(+w.miles, +w.minutes) : "";
+    openSheet({
+      title: run ? (w.kind || "Run") + " run" : w.type, edit: function () { runSheet(id); },
+      html: dlist([drow("Date", longDate(w.date)), drow("Distance", +w.miles ? r2(w.miles) + " mi" : ""), drow("Time", w.minutes ? mmss(w.minutes * 60) : ""),
+        drow("Pace", pace ? pace + " /mi" : ""), drow("Effort", w.rpe ? w.rpe + " / 10" : ""), drow("Notes", w.note ? esc(w.note).replace(/\n/g, "<br>") : "")])
+    });
+  }
+  function goalDetail(id) {
+    var g = byId("goals", id); if (!g) return;
+    var ms = g.milestones || [], pct = ms.length ? Math.round(100 * ms.filter(function (m) { return m.done; }).length / ms.length) : (g.progress || 0);
+    openSheet({
+      title: g.title, edit: function () { goalSheet(id); },
+      html: '<div class="bar"><i style="width:' + pct + '%"></i></div>' + dlist([drow("Progress", pct + "%"), drow("Target", g.due ? longDate(g.due) : ""),
+        drow("Steps", ms.length ? ms.map(function (m) { return (m.done ? "✓ " : "○ ") + esc(m.t); }).join("<br>") : ""), drow("Why", g.why ? esc(g.why).replace(/\n/g, "<br>") : "")])
+    });
+  }
+  function habitDetail(id) {
+    var h = byId("goals", id); if (!h) return;
+    var set = checked(), n30 = 0; for (var i = 0; i < 30; i++) if (set[id + "_" + ymd(addDays(new Date(), -i))]) n30++;
+    openSheet({ title: h.title, edit: function () { habitSheet(id); }, html: dlist([drow("Streak", plural(streak(id, set), "day")), drow("Last 30 days", n30 + " of 30 days")]) });
+  }
+  function weightDetail(id) {
+    var w = byId("weights", id); if (!w) return;
+    openSheet({ title: "Weigh-in", edit: function () { weightSheet(id); }, html: dlist([drow("Date", longDate(w.date)), drow("Weight", r1(w.value) + " lbs")]) });
+  }
+
   function settingsSheet() {
     openSheet({
       title: "Settings",
@@ -549,9 +595,10 @@
   }
 
 
+  function gridTitle_unused(t) { return String(t || "").replace(/^TomorrowX:\s*/i, "").replace(/^Special Topic(?: in [^:]+)?:\s*/i, "").replace(/^Optional Final Review - /i, "Review: "); }
   function mins(t) { var p = t.split(":"); return +p[0] * 60 + (+p[1] || 0); }
   function weekGrid(sel) {
-    var mon = mondayOf(parse(sel)), t = today(), HP = 30, days = [], lo = 1440, hi = 0, allday = false;
+    var mon = mondayOf(parse(sel)), t = today(), HP = 24, days = [], lo = 1440, hi = 0, allday = false;
     for (var i = 0; i < 7; i++) {
       var d = addDays(mon, i), ds = ymd(d), evs = eventsOn(ds);
       evs.forEach(function (e) { if (!e.time) { allday = true; return; } var a = mins(e.time), b = e.end ? mins(e.end) : a + 60; if (b <= a) b = Math.min(1440, a + 60); lo = Math.min(lo, a); hi = Math.max(hi, b); });
@@ -559,14 +606,14 @@
     }
     if (lo > hi) { lo = 480; hi = 1080; }
     var h0 = Math.floor(lo / 60), h1 = Math.min(24, Math.ceil(hi / 60)); if (h1 - h0 < 6) h1 = Math.min(24, h0 + 6); if (h1 - h0 < 6) h0 = h1 - 6;
-    var H = (h1 - h0) * HP, sun = addDays(mon, 6);
+    var H = (h1 - h0) * HP + 6, sun = addDays(mon, 6);
     var label = shortDate(ymd(mon)) + " – " + shortDate(ymd(sun)), thisWk = ymd(mondayOf(new Date())) === ymd(mon);
     var h = '<div class="wk-nav"><button class="btn ghost" data-act="sday" data-date="' + ymd(addDays(parse(sel), -7)) + '" aria-label="Previous week">‹</button><div class="grow"><b>' + label + '</b><small>' + (thisWk ? "This week" : ymd(mon) > t ? "Upcoming" : "Past") + '</small></div>' +
       (thisWk ? "" : '<button class="link" data-act="sday" data-date="' + t + '">Today</button>') + '<button class="btn ghost" data-act="sday" data-date="' + ymd(addDays(parse(sel), 7)) + '" aria-label="Next week">›</button></div>';
-    h += '<div class="wk"><div class="wk-head"><span></span>' + days.map(function (x) { return '<button data-act="sday" data-date="' + x.ds + '" class="' + (x.ds === sel ? "sel " : "") + (x.ds === t ? "today" : "") + '"><small>' + DAYS[x.d.getDay()].slice(0, 1) + '</small><b>' + x.d.getDate() + '</b></button>'; }).join("") + '</div>';
+    h += '<div class="wk"><div class="wk-head"><span></span>' + days.map(function (x) { return '<button data-act="sday" data-date="' + x.ds + '" class="' + (x.ds === sel ? "sel " : "") + (x.ds === t ? "today" : "") + '"><small>' + DAYS[x.d.getDay()].slice(0, 1) + '</small><b>' + x.d.getDate() + '</b><em>' + (x.evs.length || "") + '</em></button>'; }).join("") + '</div>';
     if (allday) h += '<div class="wk-all"><span>all day</span>' + days.map(function (x) { var a = x.evs.filter(function (e) { return !e.time; }); return '<div>' + a.map(function (e) { return '<i class="' + (e.ref ? "ref" : "") + '" data-act="editev" data-id="' + e.id + '" data-date="' + x.ds + '" title="' + esc(e.title) + '">' + esc(e.title) + '</i>'; }).join("") + '</div>'; }).join("") + '</div>';
     h += '<div class="wk-body" style="height:' + H + 'px"><div class="wk-hours">';
-    for (var hr = h0; hr < h1; hr++) h += '<span style="top:' + (hr - h0) * HP + 'px">' + pad(hr) + '</span><u style="top:' + (hr - h0) * HP + 'px"></u>';
+    for (var hr = h0; hr <= h1; hr++) if ((hr - h0) % 2 === 0 || hr === h1) h += '<span style="top:' + (hr - h0) * HP + 'px">' + pad(hr) + '</span><u style="top:' + (hr - h0) * HP + 'px"></u>';
     h += '</div>';
     days.forEach(function (x) {
       var timed = x.evs.filter(function (e) { return e.time; }).map(function (e) { var a = mins(e.time), b = e.end ? mins(e.end) : a + 60; if (b <= a) b = Math.min(1440, a + 60); return { e: e, a: a, b: b, lane: 0, n: 1 }; }).sort(function (p, q) { return p.a - q.a || p.b - q.b; });
@@ -575,8 +622,8 @@
       timed.forEach(function (o) { o.n = o.group[0].length; });
       h += '<div class="wk-col' + (x.ds === sel ? " sel" : "") + '" data-act="sday" data-date="' + x.ds + '">';
       timed.forEach(function (o) {
-        var top = (o.a - h0 * 60) * HP / 60, ht = Math.max(14, (o.b - o.a) * HP / 60 - 1);
-        h += '<button class="wk-ev' + (o.e.ref ? " ref" : "") + '" style="top:' + top + 'px;height:' + ht + 'px;left:' + (100 * o.lane / o.n) + '%;width:' + (100 / o.n) + '%" data-act="editev" data-id="' + o.e.id + '" data-date="' + x.ds + '" title="' + esc(o.e.title) + ' ' + time24(o.e.time) + '">' + (o.n === 1 ? esc(o.e.title) : "") + '</button>';
+        var top = (o.a - h0 * 60) * HP / 60, ht = Math.max(6, (o.b - o.a) * HP / 60 - 2);
+        h += '<button class="wk-ev' + (o.e.ref ? " ref" : "") + '" style="top:' + top + 'px;height:' + ht + 'px;left:' + (100 * o.lane / o.n) + '%;width:' + (100 / o.n) + '%" data-act="editev" data-id="' + o.e.id + '" data-date="' + x.ds + '" title="' + esc(o.e.title) + ' ' + time24(o.e.time) + '">' + '' + '</button>';
       });
       h += '</div>';
     });
@@ -585,11 +632,27 @@
     return h + '</div></div>';
   }
 
+  function dayAgenda(ds, evs) {
+    var out = "", lastEnd = null;
+    evs.filter(function (e) { return !e.time; }).forEach(function (e) { out += agendaRow(e, ds, true); });
+    evs.filter(function (e) { return e.time; }).forEach(function (e) {
+      var a = mins(e.time), b = e.end ? mins(e.end) : a + 60;
+      if (lastEnd != null && a - lastEnd >= 30) { var g = a - lastEnd; out += '<div class="ag-gap">Free ' + (g >= 60 ? Math.floor(g / 60) + "h" + (g % 60 ? " " + g % 60 + "m" : "") : g + "m") + '</div>'; }
+      out += agendaRow(e, ds, false);
+      lastEnd = lastEnd == null ? b : Math.max(lastEnd, b);
+    });
+    return '<div class="agenda">' + out + '</div>';
+  }
+  function agendaRow(e, ds, allDay) {
+    var past = ds === today() && e.time && endOf(ds, e) < new Date();
+    return '<button class="ag-ev' + (e.ref ? " ref" : "") + (past ? " past" : "") + '" data-act="editev" data-id="' + e.id + '" data-date="' + ds + '"><span class="ag-t">' + (allDay ? "All day" : time24(e.time) + (e.end ? "<small>" + time24(e.end) + "</small>" : "")) + '</span><span class="ag-b"><b>' + esc(e.title) + '</b>' + (e.place ? '<small>' + esc(e.place) + '</small>' : "") + '</span></button>';
+  }
+
   views.schedule = function () {
     var sel = ui.schedDate, evs = eventsOn(sel), t = today();
     var h = '<section class="card wkcard">' + weekGrid(sel) + '</section>';
     var timedEv = evs.filter(function (e) { return e.time; }), span = timedEv.length ? time24(timedEv[0].time) + "–" + time24(timedEv.reduce(function (m, e) { var en = e.end || e.time; return en > m ? en : m; }, "00:00")) : "";
-    h += card(sel === t ? "Today" : longDate(sel), (evs.length ? '<p class="s" style="margin:-4px 0 8px;color:var(--muted);font-size:13px">' + plural(evs.length, "event") + (span ? " · " + span : "") + '</p>' : "") + (evs.length ? '<div class="list">' + evs.map(function (e) { return eventRow(e, sel); }).join("") + '</div>' : '<div class="empty">Nothing on this day.</div>'),
+    h += card(sel === t ? "Today" : longDate(sel), (evs.length ? '<p class="s" style="margin:-4px 0 8px;color:var(--muted);font-size:13px">' + plural(evs.length, "event") + (span ? " · " + span : "") + '</p>' : "") + (evs.length ? dayAgenda(sel, evs) : '<div class="empty">Nothing on this day.</div>'),
       sel !== t ? linkBtn("Jump to today", "sday", ' data-date="' + t + '"') : "");
     var mon = mondayOf(parse(sel)), n = 0;
     for (var i = 0; i < 7; i++) n += eventsOn(ymd(addDays(mon, i))).filter(function (e) { return !e.ref; }).length;
@@ -761,13 +824,13 @@
     var a = b.dataset.act, id = b.dataset.id, ds = b.dataset.date, t = today();
     switch (a) {
       case "goto": location.hash = b.dataset.tab; break;
-      case "editev": eventSheet(id, ds); break;
+      case "editev": eventDetail(id, ds); break;
       case "sday": ui.schedDate = ds; render(true); break;
       case "icssel": exportIcs(Math.round((mondayOf(parse(ui.schedDate)) - mondayOf(new Date())) / 604800000)); break;
       case "habit": var k = id + "_" + ds; if (checked()[k]) del("checkins", k); else { save("checkins", k, { goalId: id, date: ds }); if (navigator.vibrate) navigator.vibrate(10); } break;
-      case "edithabit": habitSheet(id); break;
+      case "edithabit": habitDetail(id); break;
       case "newhabit": habitSheet(); break;
-      case "editgoal": goalSheet(id); break;
+      case "editgoal": goalDetail(id); break;
       case "newgoal": goalSheet(); break;
       case "meal": mealSheet(ds, b.dataset.slot); break;
       case "mweek": ui.mealWeek += +b.dataset.d; render(true); break;
@@ -784,10 +847,10 @@
       case "planday": planDaySheet(ds); break;
       case "logplan": var it = plan().days[ds]; runSheet(null, { date: ds, type: "Run", kind: { long: "Long", tempo: "Tempo", intervals: "Intervals", pace: "Tempo", race: "Race" }[it.type] || "Easy", miles: it.miles }); break;
       case "pweek": ui.planWeek += +b.dataset.d; render(true); break;
-      case "editrun": runSheet(id); break;
+      case "editrun": runDetail(id); break;
       case "newrun": runSheet(); break;
       case "newweight": weightSheet(); break;
-      case "editweight": weightSheet(b.dataset.id); break;
+      case "editweight": weightDetail(b.dataset.id); break;
       case "wrange": ui.wRange = b.dataset.v; render(true); break;
     }
   });
