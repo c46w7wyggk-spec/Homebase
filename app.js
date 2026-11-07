@@ -1141,7 +1141,9 @@
         if (q.op === "set") r = await sb.from("items").upsert({ user_id: uid, collection: q.c, id: q.id, data: q.data }, { onConflict: "user_id,collection,id" });
         else r = await sb.from("items").delete().eq("collection", q.c).eq("id", q.id);
         if (r.error) { if (netError(r)) break; toast("Could not save: " + r.error.message); }
-        queue.shift(); persist();
+        // Remove only the entry just sent. A newer save of the same item made while this one was uploading
+        // replaced it in the queue, and must stay queued so it gets sent too.
+        var qi = queue.indexOf(q); if (qi >= 0) queue.splice(qi, 1); persist();
       }
     })().catch(function () {}).then(function () { flushing = false; setStatus(); if (!queue.length) pull(); });
   }
