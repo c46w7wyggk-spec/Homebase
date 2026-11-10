@@ -14,6 +14,12 @@ One installable app for schedule, meals, goals, learning, and running.
 - `sw.js`, `manifest.webmanifest`, `icons/`: install and offline support
 - `vendor/supabase.js`: pinned copy of supabase-js 2.45.4
 - `supabase/migrations/`: database schema
+- `supabase/functions/dayboard-feed/`: HTTPS feed for the TV Dayboard (to-dos, events, term classes). Deployed with JWT verification off; it checks `?key=` against the SHA-256 hashes in `dayboard_feed_keys`
+
+## Data for the Dayboard
+- To-dos: `todos` collection `{title, notes, due_date, due_time, priority, list, done, done_at}`
+- School term: `settings/term` `{name, start, end, skip[]}` and the `classes` collection `{code, name, days[1=Mon..5=Fri], start, end, room, until}`
+- Events can carry an optional `group` (for example `TomorrowX`) so the TV can collapse a day of sessions
 
 ## Run locally
 `python3 -m http.server 8000` in this folder, then open http://localhost:8000.

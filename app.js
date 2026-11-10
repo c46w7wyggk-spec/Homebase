@@ -2,7 +2,7 @@
   "use strict";
 
   /* ================= utilities ================= */
-  var COLS = ["events", "meals", "grocery", "goals", "checkins", "prayers", "readings", "workouts", "weights", "settings", "learn", "context"];
+  var COLS = ["events", "meals", "grocery", "goals", "checkins", "prayers", "readings", "workouts", "weights", "settings", "learn", "context", "todos", "classes"];
   var DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   var DAYS_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   var SLOTS = [["breakfast", "Breakfast"], ["lunch", "Lunch"], ["dinner", "Dinner"], ["snack", "Snack"]];
@@ -41,7 +41,7 @@
 
   /* ================= state ================= */
   var state = {}; COLS.forEach(function (c) { state[c] = []; });
-  var ui = { schedDate: today(), mealWeek: 0, planWeek: 0, fit: "stats" };
+  var ui = { schedDate: today(), mealWeek: 0, planWeek: 0, fit: "stats", sched: "cal" };
   function byId(c, id) { for (var i = 0; i < state[c].length; i++) if (state[c][i].id === id) return state[c][i]; return null; }
   function setting(id) { return byId("settings", id) || {}; }
   function copy(o) { return JSON.parse(JSON.stringify(o)); }
@@ -58,8 +58,19 @@
     if (e.repeat === "weekly") return parse(e.date).getDay() === dow;
     return false;
   }
+  // School term: settings/term {name, start, end, skip[]} plus a "classes" collection {code, name, days[1=Mon..5=Fri], start, end, room, until}.
+  function term() { var t = setting("term"); return t.start && t.end ? t : null; }
+  function classOn(c, ds, tm) {
+    if (!tm || ds < tm.start || ds > tm.end || (c.until && ds > c.until)) return false;
+    if ((tm.skip || []).indexOf(ds) >= 0) return false;
+    return (c.days || []).indexOf(parse(ds).getDay()) >= 0;
+  }
+  function classEvent(c) { return { id: "class:" + c.id, cls: c.id, title: c.name || c.code, time: c.start, end: c.end, place: c.room, ref: true, notes: c.code }; }
+  function classesSorted() { return state.classes.slice().sort(function (a, b) { return ((a.days || [9])[0] - (b.days || [9])[0]) || ((a.start || "") < (b.start || "") ? -1 : 1); }); }
   function eventsOn(ds) {
+    var tm = term();
     return state.events.filter(function (e) { return occursOn(e, ds); })
+      .concat(state.classes.filter(function (c) { return classOn(c, ds, tm); }).map(classEvent))
       .sort(function (a, b) { return (a.time || "") < (b.time || "") ? -1 : (a.time || "") > (b.time || "") ? 1 : 0; });
   }
   function endOf(ds, e) { return e.end ? stamp(ds, e.end) : new Date(stamp(ds, e.time).getTime() + 3600000); }
@@ -286,6 +297,7 @@
       '<div class="grid2">' + field("Starts", input("time", d.time, 'type="time"')) + field("Ends", input("end", d.end, 'type="time"')) + '</div>' +
       '<div class="grid2">' + field("Repeats", select("repeat", [["none", "Never"], ["daily", "Every day"], ["weekdays", "Weekdays"], ["weekly", "Every week"]], d.repeat || "none")) +
       field("Until", input("until", d.until, 'type="date"')) + '</div>' +
+      field("Group", input("group", d.group, 'type="text" list="ev-groups" placeholder="Optional, e.g. TomorrowX"') + '<datalist id="ev-groups">' + eventGroups().map(function (g) { return '<option value="' + esc(g) + '">'; }).join("") + '</datalist>') +
       '<label class="toggle"><input type="checkbox" name="ref"' + (d.ref ? " checked" : "") + '> Already in my calendar (leave out of the export)</label>' +
       field("Notes", '<textarea name="notes" placeholder="Optional">' + esc(d.notes || "") + '</textarea>') +
       primary(e ? "Save" : "Add event");
@@ -295,7 +307,7 @@
       title: e ? "Edit event" : "New event", html: html,
       submit: function (v) {
         if (!v("title") || !v("date")) { toast("Add a title and date"); return false; }
-        var data = { title: v("title"), date: v("date"), time: v("time"), end: v("end"), place: v("place"), repeat: v("repeat"), until: v("until"), ref: v("ref"), notes: v("notes"), skip: (e && e.skip) || [] };
+        var data = { title: v("title"), date: v("date"), time: v("time"), end: v("end"), place: v("place"), repeat: v("repeat"), until: v("until"), ref: v("ref"), notes: v("notes"), group: v("group"), skip: (e && e.skip) || [] };
         save("events", id || newId(), data); ui.schedDate = data.date; toast(e ? "Saved" : "Event added");
       },
       actions: {
@@ -303,6 +315,113 @@
         endhere: function () { var prev = copy(e); save("events", id, Object.assign(copy(e), { until: ymd(addDays(parse(onDate), -1)) })); toast("Series ends before " + shortDate(onDate), function () { save("events", id, prev); }); },
         "delete": function () { delUndo("events", id, "Event"); }
       }
+    });
+  }
+
+  function eventGroups() { var s = {}; state.events.forEach(function (e) { if (e.group) s[e.group] = 1; }); return Object.keys(s).sort(); }
+
+  /* ----- to-dos: {title, notes, due_date, due_time, priority, list, done, done_at, created} ----- */
+  var PRIO = [["high", "High"], ["normal", "Normal"], ["low", "Low"]];
+  function todoLists() { var s = {}; state.todos.forEach(function (x) { if (x.list) s[x.list] = 1; }); return Object.keys(s).sort(); }
+  function dueText(x) {
+    if (!x.due_date) return "";
+    var t = today(), tm = ymd(addDays(new Date(), 1));
+    var d = x.due_date === t ? "Today" : x.due_date === tm ? "Tomorrow" : x.due_date === ymd(addDays(new Date(), -1)) ? "Yesterday" : shortDate(x.due_date);
+    return d + (x.due_time ? " " + time24(x.due_time) : "");
+  }
+  function overdue(x) {
+    if (x.done || !x.due_date) return false;
+    var t = today(); if (x.due_date < t) return true;
+    return x.due_date === t && x.due_time ? stamp(t, x.due_time) < new Date() : false;
+  }
+  function setTodoDone(id, done) {
+    var x = byId("todos", id); if (!x) return;
+    var prev = copy(x);
+    save("todos", id, Object.assign(copy(x), { done: done, done_at: done ? new Date().toISOString() : null }));
+    if (done) { if (navigator.vibrate) navigator.vibrate(10); toast("Done", function () { save("todos", id, prev); }); }
+  }
+  function todoSheet(id) {
+    var x = id ? byId("todos", id) : null, d = x || { priority: "normal" };
+    openSheet({
+      title: x ? "Edit to-do" : "New to-do",
+      html: field("To-do", input("title", d.title, 'type="text" required placeholder="What needs doing?"')) +
+        '<div class="grid2">' + field("Due date", input("due_date", d.due_date, 'type="date"')) + field("Due time", input("due_time", d.due_time, 'type="time"')) + '</div>' +
+        '<div class="grid2">' + field("Priority", select("priority", PRIO, d.priority || "normal")) +
+        field("List", input("list", d.list, 'type="text" list="todo-lists" placeholder="Optional, e.g. School"') + '<datalist id="todo-lists">' + todoLists().map(function (l) { return '<option value="' + esc(l) + '">'; }).join("") + '</datalist>') + '</div>' +
+        field("Notes", '<textarea name="notes" placeholder="Optional">' + esc(d.notes || "") + '</textarea>') +
+        (x ? '<label class="toggle"><input type="checkbox" name="done"' + (x.done ? " checked" : "") + '> Done</label>' : "") +
+        primary(x ? "Save" : "Add to-do") + (x ? sbtn("Delete to-do", "delete", "danger") : ""),
+      submit: function (v) {
+        if (!v("title")) { toast("Add a title"); return false; }
+        var done = x ? !!v("done") : false;
+        var data = { title: v("title"), notes: v("notes") || null, due_date: v("due_date") || null, due_time: v("due_date") ? (v("due_time") || null) : null,
+          priority: v("priority") || "normal", list: v("list") || null, done: done,
+          done_at: done ? (x && x.done && x.done_at ? x.done_at : new Date().toISOString()) : null, created: (x && x.created) || Date.now() };
+        save("todos", id || newId(), data); toast(x ? "Saved" : "To-do added");
+      },
+      actions: { "delete": function () { delUndo("todos", id, "To-do"); } }
+    });
+  }
+  function todoDetail(id) {
+    var x = byId("todos", id); if (!x) return;
+    openSheet({
+      title: x.title, edit: function () { todoSheet(id); },
+      html: dlist([drow("Due", esc(dueText(x))), drow("Priority", PRIO.filter(function (p) { return p[0] === (x.priority || "normal"); })[0][1]), drow("List", esc(x.list || "")),
+        drow("Status", x.done ? "Done" + (x.done_at ? " · " + shortDate(ymd(new Date(x.done_at))) : "") : "Open"), drow("Notes", x.notes ? esc(x.notes).replace(/\n/g, "<br>") : "")]) +
+        sbtn(x.done ? "Mark not done" : "Mark done", "toggle"),
+      actions: { toggle: function () { setTodoDone(id, !x.done); } }
+    });
+  }
+
+  /* ----- school term and weekly classes ----- */
+  var WEEKDAYS = [[1, "Mon"], [2, "Tue"], [3, "Wed"], [4, "Thu"], [5, "Fri"]];
+  function daysText(days) { return (days || []).slice().sort().map(function (n) { return DAYS[n]; }).join(" · "); }
+  function termSheet() {
+    var tm = copy(setting("term")); tm.skip = (tm.skip || []).slice().sort();
+    function skipHtml() { return tm.skip.length ? tm.skip.map(function (s, i) { return '<div class="row"><span class="grow">' + longDate(s) + '</span><button type="button" class="btn ghost" data-sclick="rmskip" data-i="' + i + '">Remove</button></div>'; }).join("") : '<span style="font-weight:400;color:var(--muted)">No skipped days.</span>'; }
+    openSheet({
+      title: tm.start ? "Edit term" : "Set up term",
+      html: field("Term name", input("name", tm.name || "Winter term", 'type="text" required')) +
+        '<div class="grid2">' + field("Starts", input("start", tm.start, 'type="date" required')) + field("Ends", input("end", tm.end, 'type="date" required')) + '</div>' +
+        '<div class="field"><span>Skipped days (no classes)</span><div id="skip-list" style="display:flex;flex-direction:column;gap:6px">' + skipHtml() + '</div><div class="quick">' + input("newskip", "", 'type="date"') + '<button type="button" class="btn" data-sclick="addskip">Add</button></div></div>' +
+        primary("Save term") + (tm.start ? sbtn("Remove term", "delete", "danger") : ""),
+      clicks: {
+        addskip: function (b, body) { var el = body.querySelector('[name="newskip"]'); if (el.value && tm.skip.indexOf(el.value) < 0) { tm.skip.push(el.value); tm.skip.sort(); } el.value = ""; body.querySelector("#skip-list").innerHTML = skipHtml(); },
+        rmskip: function (b, body) { tm.skip.splice(+b.dataset.i, 1); body.querySelector("#skip-list").innerHTML = skipHtml(); }
+      },
+      submit: function (v) {
+        if (!v("start") || !v("end") || v("end") < v("start")) { toast("Add a start and an end after it"); return false; }
+        if (v("newskip") && tm.skip.indexOf(v("newskip")) < 0) tm.skip.push(v("newskip"));
+        save("settings", "term", { name: v("name") || "Term", start: v("start"), end: v("end"), skip: tm.skip.sort() }); toast("Term saved");
+      },
+      actions: { "delete": function () { delUndo("settings", "term", "Term"); } }
+    });
+  }
+  function classSheet(id) {
+    var c = id ? byId("classes", id) : null, d = c || { days: [] };
+    openSheet({
+      title: c ? "Edit class" : "New class",
+      html: '<div class="grid2">' + field("Code", input("code", d.code, 'type="text" placeholder="ECON 102"')) + field("Room", input("room", d.room, 'type="text" placeholder="Optional"')) + '</div>' +
+        field("Name", input("name", d.name, 'type="text" required placeholder="Class name"')) +
+        '<div class="field"><span>Days</span><div class="seg">' + WEEKDAYS.map(function (w) { return '<label style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;font-weight:600;font-size:14px;padding:6px 0"><input type="checkbox" name="d' + w[0] + '"' + ((d.days || []).indexOf(w[0]) >= 0 ? " checked" : "") + '>' + w[1] + '</label>'; }).join("") + '</div></div>' +
+        '<div class="grid2">' + field("Starts", input("start", d.start, 'type="time" required')) + field("Ends", input("end", d.end, 'type="time" required')) + '</div>' +
+        field("Last class (if before term ends)", input("until", d.until, 'type="date"')) +
+        primary(c ? "Save" : "Add class") + (c ? sbtn("Delete class", "delete", "danger") : ""),
+      submit: function (v) {
+        var days = WEEKDAYS.filter(function (w) { return v("d" + w[0]); }).map(function (w) { return w[0]; });
+        if (!v("name") || !days.length || !v("start") || !v("end")) { toast("Add a name, days and times"); return false; }
+        save("classes", id || newId(), { code: v("code"), name: v("name"), days: days, start: v("start"), end: v("end"), room: v("room") || null, until: v("until") || null });
+        toast(c ? "Saved" : "Class added");
+      },
+      actions: { "delete": function () { delUndo("classes", id, "Class"); } }
+    });
+  }
+  function classDetail(id) {
+    var c = byId("classes", id), tm = term(); if (!c) return;
+    openSheet({
+      title: c.name || c.code, edit: function () { classSheet(id); },
+      html: dlist([drow("Code", esc(c.code || "")), drow("When", esc(daysText(c.days) + " · " + time24(c.start) + "–" + time24(c.end))), drow("Room", esc(c.room || "")),
+        drow("Runs", tm ? shortDate(tm.start) + " – " + shortDate(c.until && c.until < tm.end ? c.until : tm.end) : "No term set"), drow("Calendar", "Already in your calendar")])
     });
   }
 
@@ -486,13 +605,14 @@
   function drow(label, val) { return val === "" || val == null ? "" : '<div class="drow"><span>' + label + '</span><div>' + val + '</div></div>'; }
   function dlist(rows) { return '<div class="dlist">' + rows.join("") + '</div>'; }
   function eventDetail(id, ds) {
+    if (id && id.indexOf("class:") === 0) return classDetail(id.slice(6));
     var e = byId("events", id); if (!e) return;
     var on = ds || e.date, rep = { daily: "Every day", weekdays: "Weekdays", weekly: "Every " + DAYS_LONG[parse(e.date).getDay()] }[e.repeat] || "";
     var when = longDate(on) + (e.time ? " · " + time24(e.time) + (e.end ? "–" + time24(e.end) : "") : " · All day");
     var dur = e.time && e.end ? mins(e.end) - mins(e.time) : 0;
     openSheet({
       title: e.title, edit: function () { eventSheet(id, ds); },
-      html: dlist([drow("When", esc(when)), drow("Length", dur > 0 ? (dur >= 60 ? Math.floor(dur / 60) + "h" + (dur % 60 ? " " + dur % 60 + "m" : "") : dur + "m") : ""), drow("Where", esc(e.place || "")),
+      html: dlist([drow("When", esc(when)), drow("Length", dur > 0 ? (dur >= 60 ? Math.floor(dur / 60) + "h" + (dur % 60 ? " " + dur % 60 + "m" : "") : dur + "m") : ""), drow("Where", esc(e.place || "")), drow("Group", esc(e.group || "")),
         drow("Repeats", rep ? esc(rep) + (e.until ? " until " + shortDate(e.until) : "") : ""), drow("Calendar", e.ref ? "Already in your calendar" : "Included in the .ics export"),
         drow("Notes", e.notes ? esc(e.notes).replace(/\n/g, "<br>") : "")])
     });
@@ -647,15 +767,50 @@
     return '<button class="ag-ev' + (e.ref ? " ref" : "") + (past ? " past" : "") + '" data-act="editev" data-id="' + e.id + '" data-date="' + ds + '"><span class="ag-t">' + (allDay ? "All day" : time24(e.time) + (e.end ? "<small>" + time24(e.end) + "</small>" : "")) + '</span><span class="ag-b"><b>' + esc(e.title) + '</b>' + (e.place ? '<small>' + esc(e.place) + '</small>' : "") + '</span></button>';
   }
 
+  function todoRow(x) {
+    var od = overdue(x), sub = [];
+    if (x.due_date) sub.push('<span' + (od ? ' style="color:var(--warn)"' : "") + '>' + (od ? "Overdue · " : "") + esc(dueText(x)) + '</span>');
+    if (x.list) sub.push(esc(x.list));
+    if (x.notes) sub.push(esc(x.notes.slice(0, 60)) + (x.notes.length > 60 ? "…" : ""));
+    var pr = x.priority === "high" ? '<span class="pill" style="background:var(--warn);color:var(--bg)">High</span>' : x.priority === "low" ? '<span class="pill muted">Low</span>' : "";
+    return '<div class="item"><button class="check' + (x.done ? " on" : "") + '" data-act="ttoggle" data-id="' + x.id + '" aria-pressed="' + !!x.done + '" aria-label="' + esc(x.title) + '"></button><div class="main tap" data-act="edittodo" data-id="' + x.id + '"><div class="t"' + (x.done ? ' style="text-decoration:line-through;color:var(--muted)"' : "") + '>' + esc(x.title) + '</div>' + (sub.length ? '<div class="s">' + sub.join(" · ") + '</div>' : "") + '</div>' + (x.done ? "" : pr) + '</div>';
+  }
+  function todosView() {
+    var t = today(), rank = { high: 0, normal: 1, low: 2 };
+    var open = state.todos.filter(function (x) { return !x.done; }).sort(function (a, b) {
+      return ((a.due_date || "9999") + (a.due_time || "99")).localeCompare((b.due_date || "9999") + (b.due_time || "99")) || (rank[a.priority] || 1) - (rank[b.priority] || 1) || (a.created || 0) - (b.created || 0);
+    });
+    var groups = [["Overdue", open.filter(overdue)], ["Today", open.filter(function (x) { return x.due_date === t && !overdue(x); })],
+      ["Upcoming", open.filter(function (x) { return x.due_date && x.due_date > t; })], ["Anytime", open.filter(function (x) { return !x.due_date; })]];
+    var h = '<section class="card"><form class="quick" id="tform"><input type="text" id="ttext" placeholder="Add a to-do" enterkeyhint="done" autocomplete="off"><button class="btn primary" type="submit">Add</button></form></section>';
+    var any = false;
+    groups.forEach(function (g) { if (!g[1].length) return; any = true; h += card(g[0] + ' <span class="pill muted">' + g[1].length + '</span>', '<div class="list">' + g[1].map(todoRow).join("") + '</div>'); });
+    if (!any) h += card("To-dos", '<div class="empty">All clear. Add a to-do above, or tap + for one with a due date, priority or list.</div>');
+    var done = state.todos.filter(function (x) { return x.done; }).sort(function (a, b) { return (a.done_at || "") < (b.done_at || "") ? 1 : -1; });
+    if (done.length) h += card("Completed", '<div class="list">' + done.slice(0, 15).map(todoRow).join("") + '</div>', linkBtn("Clear", "tclear"));
+    return h;
+  }
+  function termCard() {
+    var tm = term(), cs = classesSorted();
+    if (!tm && !cs.length) return card("School term", '<p class="s" style="margin:0 0 10px;color:var(--muted)">Set the term dates and weekly classes once, and they fill in your week automatically.</p><button class="btn block" data-act="editterm">Set up term</button>');
+    var head = tm ? '<p class="s" style="margin:-4px 0 8px;color:var(--muted);font-size:13px">' + shortDate(tm.start) + ' – ' + shortDate(tm.end) + (tm.skip && tm.skip.length ? ' · no classes ' + tm.skip.map(shortDate).join(", ") : "") + '</p>' : '<p class="s" style="margin:-4px 0 8px;color:var(--warn);font-size:13px">Set the term dates so these classes show on your calendar.</p>';
+    var rows = cs.map(function (c) { return '<div class="item tap" data-act="editclass" data-id="' + c.id + '"><div class="main"><div class="t">' + esc(c.code ? c.code + " · " + c.name : c.name) + '</div><div class="s">' + esc(daysText(c.days)) + ' · ' + time24(c.start) + '–' + time24(c.end) + (c.room ? " · " + esc(c.room) : "") + (c.until ? " · ends " + shortDate(c.until) : "") + '</div></div></div>'; }).join("");
+    return card(esc(tm ? tm.name || "Term" : "Classes"), head + (rows ? '<div class="list">' + rows + '</div>' : '<div class="empty">No classes yet.</div>') + '<div class="grid2" style="margin-top:10px"><button class="btn" data-act="editterm">Edit term</button><button class="btn" data-act="newclass">Add class</button></div>');
+  }
+
   views.schedule = function () {
+    var nOpen = state.todos.filter(function (x) { return !x.done; }).length;
+    var seg = '<div class="seg" role="tablist" style="margin-bottom:12px">' + [["cal", "Calendar"], ["todo", "To-dos" + (nOpen ? " · " + nOpen : "")]].map(function (s) { return '<button role="tab" class="' + (ui.sched === s[0] ? "on" : "") + '" data-act="schedseg" data-v="' + s[0] + '">' + s[1] + '</button>'; }).join("") + '</div>';
+    if (ui.sched === "todo") return seg + todosView();
     var sel = ui.schedDate, evs = eventsOn(sel), t = today();
-    var h = '<section class="card wkcard">' + weekGrid(sel) + '</section>';
+    var h = seg + '<section class="card wkcard">' + weekGrid(sel) + '</section>';
     var timedEv = evs.filter(function (e) { return e.time; }), span = timedEv.length ? time24(timedEv[0].time) + "–" + time24(timedEv.reduce(function (m, e) { var en = e.end || e.time; return en > m ? en : m; }, "00:00")) : "";
     h += card(sel === t ? "Today" : longDate(sel), (evs.length ? '<p class="s" style="margin:-4px 0 8px;color:var(--muted);font-size:13px">' + plural(evs.length, "event") + (span ? " · " + span : "") + '</p>' : "") + (evs.length ? dayAgenda(sel, evs) : '<div class="empty">Nothing on this day.</div>'),
       sel !== t ? linkBtn("Jump to today", "sday", ' data-date="' + t + '"') : "");
     var mon = mondayOf(parse(sel)), n = 0;
     for (var i = 0; i < 7; i++) n += eventsOn(ymd(addDays(mon, i))).filter(function (e) { return !e.ref; }).length;
     h += card("Export this week", '<p class="s" style="margin:0 0 10px;color:var(--muted)">' + plural(n, "event") + ' for ' + shortDate(ymd(mon)) + '–' + shortDate(ymd(addDays(mon, 6))) + '. Classes and other events already in your calendar are left out.</p><button class="btn block" data-act="icssel">Download .ics</button>');
+    h += termCard();
     return h;
   };
 
@@ -989,6 +1144,13 @@
       case "goto": location.hash = b.dataset.tab; break;
       case "editev": eventDetail(id, ds); break;
       case "sday": ui.schedDate = ds; render(true); break;
+      case "schedseg": ui.sched = b.dataset.v; render(true); break;
+      case "ttoggle": var td = byId("todos", id); if (td) setTodoDone(id, !td.done); break;
+      case "edittodo": todoDetail(id); break;
+      case "tclear": var tgone = state.todos.filter(function (x) { return x.done; }).map(copy); tgone.forEach(function (x) { del("todos", x.id); }); toast(plural(tgone.length, "to-do") + " cleared", function () { tgone.forEach(function (x) { var i = x.id; delete x.id; save("todos", i, x); }); }); break;
+      case "editterm": termSheet(); break;
+      case "newclass": classSheet(); break;
+      case "editclass": classDetail(id); break;
       case "icssel": exportIcs(Math.round((mondayOf(parse(ui.schedDate)) - mondayOf(new Date())) / 604800000)); break;
       case "habit": var k = id + "_" + ds; if (checked()[k]) del("checkins", k); else { save("checkins", k, { goalId: id, date: ds }); if (navigator.vibrate) navigator.vibrate(10); } break;
       case "edithabit": habitDetail(id); break;
@@ -1029,6 +1191,12 @@
     if (ev.target.id === "lexpl" && ui.L && ui.L.steps[ui.L.si]) ui.L.steps[ui.L.si].text = ev.target.value;
   });
   view.addEventListener("submit", function (ev) {
+    if (ev.target.id === "tform") {
+      ev.preventDefault();
+      var te = $("ttext"), tv = te.value.trim(); if (!tv) return;
+      save("todos", newId(), { title: tv, notes: null, due_date: null, due_time: null, priority: "normal", list: null, done: false, done_at: null, created: Date.now() });
+      te.value = ""; te.focus(); return;
+    }
     if (ev.target.id !== "gform") return;
     ev.preventDefault();
     var el = $("gtext"), v = el.value.trim(); if (!v) return;
@@ -1066,12 +1234,12 @@
 
   $("fab").addEventListener("click", function () {
     var tab = current();
-    if (tab === "schedule") return eventSheet(null, ui.schedDate);
+    if (tab === "schedule") return ui.sched === "todo" ? todoSheet() : eventSheet(null, ui.schedDate);
     if (tab === "faith") return prayerSheet();
     if (tab === "fitness") return runSheet();
     if (tab === "goals") return quickMenu([["Habit", function () { habitSheet(); }], ["Goal", function () { goalSheet(); }]]);
     if (tab === "meals") return quickMenu([["Meal today", function () { mealSheet(today(), new Date().getHours() < 11 ? "breakfast" : new Date().getHours() < 16 ? "lunch" : "dinner"); }], ["Grocery item", function () { var el = $("gtext"); if (el) el.focus(); }]]);
-    quickMenu([["Event", function () { eventSheet(null, today()); }], ["Workout", function () { runSheet(); }], ["Habit", function () { habitSheet(); }], ["Goal", function () { goalSheet(); }]]);
+    quickMenu([["Event", function () { eventSheet(null, today()); }], ["To-do", function () { todoSheet(); }], ["Workout", function () { runSheet(); }], ["Habit", function () { habitSheet(); }], ["Goal", function () { goalSheet(); }]]);
   });
   $("settings-btn").addEventListener("click", settingsSheet);
 
