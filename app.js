@@ -775,6 +775,14 @@
     var pr = x.priority === "high" ? '<span class="pill" style="background:var(--warn);color:var(--bg)">High</span>' : x.priority === "low" ? '<span class="pill muted">Low</span>' : "";
     return '<div class="item"><button class="check' + (x.done ? " on" : "") + '" data-act="ttoggle" data-id="' + x.id + '" aria-pressed="' + !!x.done + '" aria-label="' + esc(x.title) + '"></button><div class="main tap" data-act="edittodo" data-id="' + x.id + '"><div class="t"' + (x.done ? ' style="text-decoration:line-through;color:var(--muted)"' : "") + '>' + esc(x.title) + '</div>' + (sub.length ? '<div class="s">' + sub.join(" · ") + '</div>' : "") + '</div>' + (x.done ? "" : pr) + '</div>';
   }
+  // TV theme for the Dayboard: settings/dayboard {theme}. The dayboard-feed function sends it to the TV.
+  var THEMES = [["dynamic", "Dynamic"], ["dark", "Dark"], ["light", "Light"], ["christmas", "Christmas"]];
+  function dayboardTheme() { var t = setting("dayboard").theme; return THEMES.some(function (x) { return x[0] === t; }) ? t : "dynamic"; }
+  function themePicker() {
+    var cur = dayboardTheme();
+    return '<div class="field" style="margin:-4px 0 12px"><span style="font-size:13px;color:var(--muted);font-weight:600">TV theme' + (cur === "dynamic" ? ' · follows time and weather' : "") + '</span><div class="seg" role="radiogroup" aria-label="TV theme">' +
+      THEMES.map(function (x) { return '<button role="radio" aria-checked="' + (cur === x[0]) + '" class="' + (cur === x[0] ? "on" : "") + '" data-act="tvtheme" data-v="' + x[0] + '">' + x[1] + '</button>'; }).join("") + '</div></div>';
+  }
   function todosView() {
     var t = today(), rank = { high: 0, normal: 1, low: 2 };
     var open = state.todos.filter(function (x) { return !x.done; }).sort(function (a, b) {
@@ -801,6 +809,7 @@
   views.schedule = function () {
     var nOpen = state.todos.filter(function (x) { return !x.done; }).length;
     var seg = '<div class="seg" role="tablist" style="margin-bottom:12px">' + [["cal", "Calendar"], ["todo", "To-dos" + (nOpen ? " · " + nOpen : "")]].map(function (s) { return '<button role="tab" class="' + (ui.sched === s[0] ? "on" : "") + '" data-act="schedseg" data-v="' + s[0] + '">' + s[1] + '</button>'; }).join("") + '</div>';
+    seg += themePicker();
     if (ui.sched === "todo") return seg + todosView();
     var sel = ui.schedDate, evs = eventsOn(sel), t = today();
     var h = seg + '<section class="card wkcard">' + weekGrid(sel) + '</section>';
@@ -1145,6 +1154,7 @@
       case "editev": eventDetail(id, ds); break;
       case "sday": ui.schedDate = ds; render(true); break;
       case "schedseg": ui.sched = b.dataset.v; render(true); break;
+      case "tvtheme": if (b.dataset.v !== dayboardTheme()) { save("settings", "dayboard", Object.assign(copy(setting("dayboard")), { theme: b.dataset.v })); if (navigator.vibrate) navigator.vibrate(8); } break;
       case "ttoggle": var td = byId("todos", id); if (td) setTodoDone(id, !td.done); break;
       case "edittodo": todoDetail(id); break;
       case "tclear": var tgone = state.todos.filter(function (x) { return x.done; }).map(copy); tgone.forEach(function (x) { del("todos", x.id); }); toast(plural(tgone.length, "to-do") + " cleared", function () { tgone.forEach(function (x) { var i = x.id; delete x.id; save("todos", i, x); }); }); break;

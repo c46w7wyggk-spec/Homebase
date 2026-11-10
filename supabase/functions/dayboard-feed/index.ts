@@ -92,7 +92,9 @@ async function feed(uid: string) {
     }).sort((a, b) => (a.days[0] ?? 9) - (b.days[0] ?? 9) || a.start.localeCompare(b.start));
     term = { name: String(t.name || "Term"), start: t.start, end: t.end, skip: Array.isArray(t.skip) ? [...t.skip].sort() : [], classes };
   }
-  return { version: 1, updated: new Date().toISOString(), todos, events, term };
+  const th = rows.find((r) => r.collection === "settings" && r.id === "dayboard")?.data?.theme;
+  const theme = ["dynamic", "dark", "light", "christmas"].includes(th) ? th : "dynamic";
+  return { version: 1, updated: new Date().toISOString(), todos, events, term, settings: { theme } };
 }
 
 Deno.serve(async (req) => {
