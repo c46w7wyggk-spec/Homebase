@@ -2,7 +2,7 @@
   "use strict";
 
   /* ================= utilities ================= */
-  var COLS = ["events", "meals", "grocery", "goals", "checkins", "prayers", "readings", "workouts", "weights", "settings", "learn", "context", "todos", "classes"];
+  var COLS = ["events", "meals", "grocery", "goals", "checkins", "prayers", "readings", "workouts", "weights", "settings", "learn", "context", "todos", "classes", "routine_done", "study"];
   var DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   var DAYS_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   var SLOTS = [["breakfast", "Breakfast"], ["lunch", "Lunch"], ["dinner", "Dinner"], ["snack", "Snack"]];
@@ -37,7 +37,8 @@
     learn: '<svg viewBox="0 0 24 24"><path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c0 1.5 2.7 3 6 3s6-1.5 6-3v-5M22 9v6"/></svg>',
     chev: '<svg class="chev" viewBox="0 0 24 24" width="18" height="18" style="stroke:currentColor;fill:none;stroke-width:2"><path d="M9 6l6 6-6 6"/></svg>'
   };
-  var TABS = [["today", "Today"], ["schedule", "Schedule"], ["goals", "Goals"], ["learn", "Learn"], ["fitness", "Fitness"]];
+  // Goals and Learn are hidden from the tab bar (2026-11-20 overhaul); their data and code stay.
+  var TABS = [["today", "Today"], ["schedule", "Schedule"], ["fitness", "Fitness"]];
 
   /* ================= state ================= */
   var state = {}; COLS.forEach(function (c) { state[c] = []; });
@@ -77,7 +78,7 @@
   function upNext() {
     var now = new Date();
     for (var i = 0; i < 15; i++) {
-      var ds = ymd(addDays(now, i)), evs = eventsOn(ds);
+      var ds = ymd(addDays(now, i)), evs = dayItems(ds).filter(function (e) { return !(e.blk && e.blk.done); });
       for (var k = 0; k < evs.length; k++) {
         var e = evs[k], st = stamp(ds, e.time);
         if (e.time && st <= now && now < endOf(ds, e)) return { e: e, ds: ds, now: true };
@@ -112,6 +113,81 @@
     if (ms.length) return Math.round(100 * ms.filter(function (m) { return m.done; }).length / ms.length);
     return +g.progress || 0;
   }
+
+  /* ================= routine: weekly blocks + weekly targets ================= */
+  // settings/routine {targets:{break:{study,runs,cook}, school:{...}}, blocks:{break:[Block], school:[Block]}, alarms, pausedUntil}
+  // Block {id, kind, title, days[0=Sun..6=Sat], start, end}. School blocks apply between the term's start and end dates; break blocks otherwise.
+  // Done marks: routine_done/<blockId>_<date> {block, date, kind}. Extra cook nights use the block id "cook-extra".
+  // Study sessions: study/<id> {date, cls, minutes, block?}. A running study timer: settings/timer {start (ms), cls}.
+  var KINDS = [["run", "Run"], ["study", "Study"], ["cook", "Cook"], ["bible", "Bible"], ["strength", "Strength"], ["clean", "Clean"], ["other", "Other"]];
+  function B(id, kind, title, days, start, end) { return { id: id, kind: kind, title: title, days: days, start: start, end: end }; }
+  var DEFAULT_ROUTINE = {
+    targets: { "break": { study: 3, runs: 4, cook: 3 }, school: { study: 15, runs: 4, cook: 3 } },
+    alarms: true, pausedUntil: null,
+    blocks: {
+      "break": [
+        B("b-run", "run", "Run", [1, 2, 3, 4, 6], "15:00", "15:45"),
+        B("b-str", "strength", "Strength, 15 min", [1, 4], "15:50", "16:05"),
+        B("b-cook", "cook", "Cook dinner", [1, 3, 5], "18:00", "19:00"),
+        B("b-study", "study", "Study", [1, 2, 3, 4], "19:30", "20:15"),
+        B("b-clean", "clean", "Clean reset, 20 min", [6], "11:00", "11:20"),
+        B("b-bible", "bible", "Bible", [0, 1, 2, 3, 4, 5, 6], "21:30", "21:45")
+      ],
+      school: [
+        B("s-study-am", "study", "Study", [1], "09:30", "11:00"),
+        B("s-study-tt", "study", "Study", [2, 4], "11:30", "13:15"),
+        B("s-study-mw", "study", "Study", [1, 3], "12:50", "13:40"),
+        B("s-study-fri", "study", "Study", [5], "10:00", "13:00"),
+        B("s-run-mw", "run", "Run", [1, 3], "15:30", "16:30"),
+        B("s-str", "strength", "Strength, 20 min", [1, 3], "16:35", "16:55"),
+        B("s-run-tt", "run", "Run", [2, 4], "17:00", "18:00"),
+        B("s-run-sat", "run", "Long run", [6], "10:00", "11:30"),
+        B("s-cook", "cook", "Cook dinner", [2, 4], "18:30", "19:15"),
+        B("s-cook-sun", "cook", "Cook for the week", [0], "16:00", "17:30"),
+        B("s-study-pm", "study", "Study", [1, 2, 3, 4], "19:30", "21:00"),
+        B("s-clean", "clean", "Clean reset, 30 min", [5], "14:00", "14:30"),
+        B("s-bible", "bible", "Bible", [0, 1, 2, 3, 4, 5, 6], "21:30", "21:45")
+      ]
+    }
+  };
+  function routine() {
+    var r = setting("routine");
+    return { targets: r.targets || copy(DEFAULT_ROUTINE.targets), blocks: r.blocks || copy(DEFAULT_ROUTINE.blocks), alarms: r.alarms !== false, pausedUntil: r.pausedUntil || null };
+  }
+  function saveRoutine(r) { save("settings", "routine", r); }
+  function modeOn(ds) { var tm = term(); return tm && ds >= tm.start && ds <= tm.end ? "school" : "break"; }
+  function paused(ds) { var p = routine().pausedUntil; return !!(p && ds <= p); }
+  function blocksOn(ds) {
+    if (paused(ds)) return [];
+    var dow = parse(ds).getDay();
+    return (routine().blocks[modeOn(ds)] || []).filter(function (b) { return (b.days || []).indexOf(dow) >= 0; })
+      .sort(function (a, b) { return a.start < b.start ? -1 : 1; })
+      .map(function (b) { var k = b.id + "_" + ds; return { b: b, ds: ds, key: k, done: !!byId("routine_done", k) }; });
+  }
+  function blockEvent(x) { return { id: "blk:" + x.key, blk: x, title: x.b.title, time: x.b.start, end: x.b.end, kind: x.b.kind }; }
+  // Events, classes and routine blocks for one day, in time order.
+  function dayItems(ds) {
+    return eventsOn(ds).concat(blocksOn(ds).map(blockEvent))
+      .sort(function (a, b) { return (a.time || "") < (b.time || "") ? -1 : (a.time || "") > (b.time || "") ? 1 : 0; });
+  }
+  function blockMins(b) { var d = mins(b.end || b.start) - mins(b.start); return d > 0 ? d : 30; }
+  function weekRange(d) { var mon = mondayOf(d || new Date()); return [ymd(mon), ymd(addDays(mon, 6))]; }
+  function weekProgress() {
+    var w = weekRange(), inW = function (ds) { return ds >= w[0] && ds <= w[1]; };
+    var tg = routine().targets[modeOn(today())] || DEFAULT_ROUTINE.targets["break"];
+    var studyMin = state.study.filter(function (s) { return inW(s.date); }).reduce(function (a, s) { return a + (+s.minutes || 0); }, 0);
+    var runDays = {};
+    state.workouts.forEach(function (x) { if (x.type === "Run" && inW(x.date)) runDays[x.date] = 1; });
+    state.routine_done.forEach(function (x) { if (x.kind === "run" && inW(x.date)) runDays[x.date] = 1; });
+    var cook = state.routine_done.filter(function (x) { return x.kind === "cook" && inW(x.date); }).length;
+    return { study: studyMin / 60, studyT: +tg.study || 0, runs: Object.keys(runDays).length, runsT: +tg.runs || 0, cook: cook, cookT: +tg.cook || 0 };
+  }
+  function studyLabel(cls) { var c = byId("classes", cls); return c ? (c.code || c.name) : "General"; }
+  // Classes that meet at least once this term (a dropped class ends before the term starts).
+  function activeClasses() { var tm = term(); return classesSorted().filter(function (c) { return !c.until || !tm || c.until >= tm.start; }); }
+  function studyOptions() { return activeClasses().map(function (c) { return [c.id, c.code ? c.code + " · " + c.name : c.name]; }).concat([["other", "General"]]); }
+  function timer() { var t = setting("timer"); return t.start ? t : null; }
+  function hm(m) { m = Math.round(m); return m >= 60 ? Math.floor(m / 60) + "h" + (m % 60 ? " " + m % 60 + "m" : "") : m + "m"; }
 
   /* ================= Bible reading plan ================= */
   var BOOKS = [["Genesis",50],["Exodus",40],["Leviticus",27],["Numbers",36],["Deuteronomy",34],["Joshua",24],["Judges",21],["Ruth",4],["1 Samuel",31],["2 Samuel",24],["1 Kings",22],["2 Kings",25],["1 Chronicles",29],["2 Chronicles",36],["Ezra",10],["Nehemiah",13],["Esther",10],["Job",42],["Psalms",150],["Proverbs",31],["Ecclesiastes",12],["Song of Solomon",8],["Isaiah",66],["Jeremiah",52],["Lamentations",5],["Ezekiel",48],["Daniel",12],["Hosea",14],["Joel",3],["Amos",9],["Obadiah",1],["Jonah",4],["Micah",7],["Nahum",3],["Habakkuk",3],["Zephaniah",3],["Haggai",2],["Zechariah",14],["Malachi",4],["Matthew",28],["Mark",16],["Luke",24],["John",21],["Acts",28],["Romans",16],["1 Corinthians",16],["2 Corinthians",13],["Galatians",6],["Ephesians",6],["Philippians",4],["Colossians",4],["1 Thessalonians",5],["2 Thessalonians",3],["1 Timothy",6],["2 Timothy",4],["Titus",3],["Philemon",1],["Hebrews",13],["James",5],["1 Peter",5],["2 Peter",3],["1 John",5],["2 John",1],["3 John",1],["Jude",1],["Revelation",22]];
@@ -375,7 +451,7 @@
 
   /* ----- school term and weekly classes ----- */
   var WEEKDAYS = [[1, "Mon"], [2, "Tue"], [3, "Wed"], [4, "Thu"], [5, "Fri"]];
-  function daysText(days) { return (days || []).slice().sort().map(function (n) { return DAYS[n]; }).join(" · "); }
+  function daysText(days) { return (days || []).slice().sort(function (a, b) { return (a || 7) - (b || 7); }).map(function (n) { return DAYS[n]; }).join(" · "); }
   function termSheet() {
     var tm = copy(setting("term")); tm.skip = (tm.skip || []).slice().sort();
     function skipHtml() { return tm.skip.length ? tm.skip.map(function (s, i) { return '<div class="row"><span class="grow">' + longDate(s) + '</span><button type="button" class="btn ghost" data-sclick="rmskip" data-i="' + i + '">Remove</button></div>'; }).join("") : '<span style="font-weight:400;color:var(--muted)">No skipped days.</span>'; }
@@ -589,6 +665,146 @@
     return s + '</svg>';
   }
 
+  /* ----- routine sheets ----- */
+  function runKind(it) { return it ? ({ long: "Long", tempo: "Tempo", intervals: "Intervals", pace: "Tempo", race: "Race" }[it.type] || "Easy") : "Easy"; }
+  function toggleBlock(key) {
+    var i = key.lastIndexOf("_"), bid = key.slice(0, i), ds = key.slice(i + 1);
+    var x = blocksOn(ds).filter(function (y) { return y.key === key; })[0]; if (!x) return;
+    if (x.done) {
+      var prev = copy(byId("routine_done", key)), sess = state.study.filter(function (s) { return s.block === key; }).map(copy);
+      del("routine_done", key); sess.forEach(function (s) { del("study", s.id); });
+      toast("Marked not done", function () { save("routine_done", key, prev); sess.forEach(function (s) { var sid = s.id; save("study", sid, s); }); });
+      return;
+    }
+    if (x.b.kind === "study") return studyLogSheet({ ds: ds, minutes: blockMins(x.b), block: key });
+    save("routine_done", key, { block: bid, date: ds, kind: x.b.kind });
+    if (navigator.vibrate) navigator.vibrate(10);
+    if (x.b.kind === "run" && !runsOn(ds).some(function (w) { return w.type === "Run"; })) {
+      var it = plan() && plan().days[ds];
+      setTimeout(function () { runSheet(null, { date: ds, type: "Run", kind: runKind(it), miles: it && it.type !== "rest" ? it.miles : "" }); }, 150);
+      toast("Run done. Add the details if you like.");
+    } else toast(x.b.kind === "cook" ? "Cooked. Nice." : "Done");
+  }
+  function studyLogSheet(o) {
+    o = o || {};
+    var opts = studyOptions(), def = o.cls || (opts[0] && opts[0][0]) || "other";
+    openSheet({
+      title: "Log study time",
+      html: field("Class", select("cls", opts, def)) +
+        '<div class="grid2">' + field("Date", input("date", o.ds || today(), 'type="date" required')) + field("Minutes", input("min", o.minutes || 60, 'type="number" min="1" max="600" inputmode="numeric" required')) + '</div>' +
+        primary("Save"),
+      submit: function (v) {
+        var m = clamp(Math.round(+v("min") || 0), 0, 600); if (!m) { toast("Add the minutes"); return false; }
+        save("study", newId(), { date: v("date"), cls: v("cls"), minutes: m, block: o.block || null });
+        if (o.block) { var i = o.block.lastIndexOf("_"); save("routine_done", o.block, { block: o.block.slice(0, i), date: o.block.slice(i + 1), kind: "study" }); }
+        if (navigator.vibrate) navigator.vibrate(10);
+        toast(hm(m) + " of " + studyLabel(v("cls")) + " logged");
+      }
+    });
+  }
+  function timerStartSheet() {
+    var opts = studyOptions();
+    openSheet({
+      title: "Start studying",
+      html: field("Class", select("cls", opts, ui.lastCls || (opts[0] && opts[0][0]) || "other")) +
+        '<p class="s" style="margin:0;color:var(--muted)">The timer keeps running if you close the app. Tap Stop on Today when you finish.</p>' + primary("Start timer"),
+      submit: function (v) { ui.lastCls = v("cls"); save("settings", "timer", { start: Date.now(), cls: v("cls") }); toast("Timer started"); }
+    });
+  }
+  function stopTimer() {
+    var t = timer(); if (!t) return;
+    var m = Math.min(600, Math.round((Date.now() - t.start) / 60000)), ds = ymd(new Date(t.start));
+    del("settings", "timer");
+    if (m < 1) { toast("Timer stopped. Under a minute, so nothing logged."); return; }
+    // The time counts toward the first open study block that day, if there is one.
+    var blk = blocksOn(ds).filter(function (x) { return x.b.kind === "study" && !x.done; })[0];
+    var sid = newId(); save("study", sid, { date: ds, cls: t.cls, minutes: m, block: blk ? blk.key : null });
+    if (blk) save("routine_done", blk.key, { block: blk.b.id, date: ds, kind: "study" });
+    toast(hm(m) + " of " + studyLabel(t.cls) + " logged", function () { del("study", sid); if (blk) del("routine_done", blk.key); save("settings", "timer", t); });
+  }
+  function studyWeekSheet() {
+    var w = weekRange(), p = weekProgress(), by = {}, list = state.study.filter(function (s) { return s.date >= w[0] && s.date <= w[1]; });
+    list.forEach(function (s) { by[s.cls] = (by[s.cls] || 0) + (+s.minutes || 0); });
+    var cls = activeClasses().filter(function (c) { return modeOn(today()) !== "school" || !c.until || c.until >= today(); });
+    var share = cls.length && p.studyT ? p.studyT * 60 / cls.length : 0;
+    var rows = cls.map(function (c) { var m = by[c.id] || 0; return '<div class="item"><div class="main"><div class="t">' + esc(c.code || c.name) + '</div>' + (share ? '<div class="bar" style="margin-top:6px"><i style="width:' + Math.min(100, Math.round(100 * m / share)) + '%"></i></div>' : "") + '</div><b style="font-variant-numeric:tabular-nums">' + hm(m) + (share ? '<small style="color:var(--muted);font-weight:500"> / ' + hm(share) + '</small>' : "") + '</b></div>'; }).join("");
+    if (by.other) rows += '<div class="item"><div class="main t">General</div><b>' + hm(by.other) + '</b></div>';
+    var recent = list.sort(function (a, b) { return a.date < b.date ? 1 : -1; }).map(function (s) { return '<div class="item"><span class="time">' + DAYS[parse(s.date).getDay()] + '</span><div class="main t">' + esc(studyLabel(s.cls)) + ' · ' + hm(s.minutes) + '</div><button type="button" class="btn ghost" data-sclick="rm" data-id="' + s.id + '" aria-label="Remove">✕</button></div>'; }).join("");
+    openSheet({
+      title: "Study this week",
+      html: '<p class="s" style="margin:0;color:var(--muted)">' + r1(p.study) + ' of ' + p.studyT + ' hours. ' + (share ? "Each class gets an equal share of the target." : "") + '</p>' +
+        (rows ? '<div class="list">' + rows + '</div>' : '<div class="empty">No classes yet.</div>') +
+        (recent ? '<div class="label" style="margin-top:6px">Sessions</div><div class="list">' + recent + '</div>' : "") +
+        '<button type="button" class="btn block" data-sclick="log">Add time by hand</button>',
+      clicks: {
+        rm: function (b) { var s = copy(byId("study", b.dataset.id)); if (!s) return; del("study", s.id); if (s.block) del("routine_done", s.block); closeSheet(); toast("Session removed", function () { var i = s.id; save("study", i, s); }); },
+        log: function () { closeSheet(); setTimeout(function () { studyLogSheet(); }, 280); }
+      }
+    });
+  }
+  function blockDetail(key) {
+    var i = key.lastIndexOf("_"), ds = key.slice(i + 1), x = blocksOn(ds).filter(function (y) { return y.key === key; })[0]; if (!x) return;
+    var it = x.b.kind === "run" && plan() ? plan().days[ds] : null;
+    openSheet({
+      title: x.b.title, edit: function () { blockSheet(modeOn(ds), x.b.id); },
+      html: dlist([drow("When", esc(longDate(ds) + " · " + time24(x.b.start) + "–" + time24(x.b.end))), drow("Repeats", esc(daysText(x.b.days))),
+        drow("Routine", modeOn(ds) === "school" ? "School weeks" : "Break weeks"), drow("Plan", it ? esc(it.title + (it.miles ? " · " + it.miles + " mi" : "") + ". " + it.detail) : "")]) +
+        sbtn(x.done ? "Mark not done" : x.b.kind === "study" ? "Log study time" : "Mark done", "toggle"),
+      actions: { toggle: function () { setTimeout(function () { toggleBlock(key); }, 300); } }
+    });
+  }
+  function routineSheet() {
+    var r = routine(), m = modeOn(today()), tm = term();
+    var next = m === "break" && tm && tm.start > today() ? " It switches to your school routine on " + longDate(tm.start) + "." : "";
+    openSheet({
+      title: "Routine",
+      html: '<p class="s" style="margin:0;color:var(--muted)">You are on your <b>' + (m === "school" ? "school" : "break") + '</b> routine.' + next + '</p>' +
+        '<div class="grid2"><button type="button" class="btn" data-sclick="edit" data-m="break">Break routine</button><button type="button" class="btn" data-sclick="edit" data-m="school">School routine</button></div>' +
+        '<label class="toggle"><input type="checkbox" name="alarms"' + (r.alarms ? " checked" : "") + '> Put routine blocks in the calendar export, with alarms</label>' +
+        field("Pause routine until (for trips)", input("pause", r.pausedUntil || "", 'type="date"')) +
+        primary("Save") + '<button type="button" class="btn ghost block" data-sclick="reset">Reset both routines to the starting template</button>',
+      clicks: {
+        edit: function (b) { var md = b.dataset.m; closeSheet(); setTimeout(function () { routineModeSheet(md); }, 280); },
+        reset: function () { var prev = copy(setting("routine")); var nr = routine(); nr.blocks = copy(DEFAULT_ROUTINE.blocks); nr.targets = copy(DEFAULT_ROUTINE.targets); saveRoutine(nr); closeSheet(); toast("Routines reset", function () { saveRoutine(prev); }); }
+      },
+      submit: function (v) { var nr = routine(); nr.alarms = !!v("alarms"); nr.pausedUntil = v("pause") || null; saveRoutine(nr); toast(nr.pausedUntil ? "Paused until " + shortDate(nr.pausedUntil) : "Saved"); }
+    });
+  }
+  function routineModeSheet(md) {
+    var r = routine(), tg = r.targets[md] || {}, bl = (r.blocks[md] || []).slice().sort(function (a, b) { return (a.days[0] === 0 ? 7 : a.days[0]) - (b.days[0] === 0 ? 7 : b.days[0]) || (a.start < b.start ? -1 : 1); });
+    openSheet({
+      title: md === "school" ? "School routine" : "Break routine",
+      html: '<div class="label">Weekly targets</div><div class="grid3">' + field("Study hours", input("study", tg.study, 'type="number" min="0" max="60" inputmode="decimal"')) + field("Runs", input("runs", tg.runs, 'type="number" min="0" max="14" inputmode="numeric"')) + field("Cook nights", input("cook", tg.cook, 'type="number" min="0" max="14" inputmode="numeric"')) + '</div>' +
+        '<div class="label">Blocks</div><div class="list">' + bl.map(function (b) { return '<button type="button" class="item tap" style="text-align:left;width:100%;background:none;border:0;color:inherit;font:inherit" data-sclick="blk" data-id="' + esc(b.id) + '"><span class="time">' + time24(b.start) + '</span><div class="main"><div class="t"><span class="kdot k-' + b.kind + '"></span>' + esc(b.title) + '</div><div class="s">' + esc(daysText(b.days)) + ' · until ' + time24(b.end) + '</div></div>' + ICON.chev + '</button>'; }).join("") + '</div>' +
+        '<button type="button" class="btn block" data-sclick="add">Add block</button>' + primary("Save targets"),
+      clicks: {
+        blk: function (b) { var id = b.dataset.id; closeSheet(); setTimeout(function () { blockSheet(md, id); }, 280); },
+        add: function () { closeSheet(); setTimeout(function () { blockSheet(md); }, 280); }
+      },
+      submit: function (v) { var nr = routine(); nr.targets[md] = { study: +v("study") || 0, runs: +v("runs") || 0, cook: +v("cook") || 0 }; saveRoutine(nr); toast("Targets saved"); }
+    });
+  }
+  function blockSheet(md, id) {
+    var r = routine(), list = r.blocks[md] || [], b = id ? list.filter(function (x) { return x.id === id; })[0] : null, d = b || { kind: "study", days: [], start: "19:30", end: "20:30" };
+    var ALLD = [[1, "M"], [2, "T"], [3, "W"], [4, "T"], [5, "F"], [6, "S"], [0, "S"]];
+    openSheet({
+      title: b ? "Edit block" : "New block",
+      html: '<div class="grid2">' + field("Type", select("kind", KINDS, d.kind)) + field("Name", input("title", d.title, 'type="text" placeholder="e.g. Study"')) + '</div>' +
+        '<div class="field"><span>Days</span><div class="seg">' + ALLD.map(function (w) { return '<label style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;font-weight:600;font-size:13px;padding:6px 0"><input type="checkbox" name="d' + w[0] + '"' + ((d.days || []).indexOf(w[0]) >= 0 ? " checked" : "") + '>' + w[1] + '</label>'; }).join("") + '</div></div>' +
+        '<div class="grid2">' + field("Starts", input("start", d.start, 'type="time" required')) + field("Ends", input("end", d.end, 'type="time" required')) + '</div>' +
+        primary(b ? "Save" : "Add block") + (b ? sbtn("Delete block", "delete", "danger") : ""),
+      submit: function (v) {
+        var days = ALLD.map(function (w) { return w[0]; }).filter(function (n) { return v("d" + n); });
+        if (!days.length || !v("start") || !v("end")) { toast("Pick days and times"); return false; }
+        var nr = routine(), L = nr.blocks[md] = nr.blocks[md] || [], kindName = KINDS.filter(function (k) { return k[0] === v("kind"); })[0][1];
+        var nb = { id: b ? b.id : md[0] + "-" + newId(), kind: v("kind"), title: v("title") || kindName, days: days.sort(), start: v("start"), end: v("end") > v("start") ? v("end") : v("start") };
+        var at = L.findIndex(function (x) { return x.id === nb.id; }); if (at >= 0) L[at] = nb; else L.push(nb);
+        saveRoutine(nr); toast(b ? "Saved" : "Block added");
+      },
+      actions: { "delete": function () { var prev = copy(setting("routine")), nr = routine(); nr.blocks[md] = list.filter(function (x) { return x.id !== id; }); saveRoutine(nr); toast("Block deleted", function () { saveRoutine(prev); }); } }
+    });
+  }
+
   function planDaySheet(ds) {
     var p = plan(), it = p.days[ds], done = runsOn(ds).filter(function (w) { return w.type === "Run"; });
     openSheet({
@@ -606,6 +822,7 @@
   function dlist(rows) { return '<div class="dlist">' + rows.join("") + '</div>'; }
   function eventDetail(id, ds) {
     if (id && id.indexOf("class:") === 0) return classDetail(id.slice(6));
+    if (id && id.indexOf("blk:") === 0) return blockDetail(id.slice(4));
     var e = byId("events", id); if (!e) return;
     var on = ds || e.date, rep = { daily: "Every day", weekdays: "Weekdays", weekly: "Every " + DAYS_LONG[parse(e.date).getDay()] }[e.repeat] || "";
     var when = longDate(on) + (e.time ? " · " + time24(e.time) + (e.end ? "–" + time24(e.end) : "") : " · All day");
@@ -649,16 +866,26 @@
     openSheet({
       title: "Settings",
       html: '<div class="field"><span>Export to your calendar</span><div class="grid2"><button type="button" class="btn" data-sclick="ics" data-off="0">This week</button><button type="button" class="btn" data-sclick="ics" data-off="1">Next week</button></div>' +
-        '<span style="font-weight:400">Events marked "already in my calendar" are left out.</span></div>' +
+        '<span style="font-weight:400">Events marked "already in my calendar" are left out. Routine blocks are included with alarms unless you turn that off in Routine.</span></div>' +
+        '<button type="button" class="btn block" data-sclick="routine">Routine and weekly targets</button>' +
         '<button type="button" class="btn block" data-sclick="update">Check for app update</button>' +
         '<button type="button" class="btn danger block" data-sclick="signout">Sign out</button>' +
-        '<p class="s" style="margin:0;color:var(--muted);text-align:center">Homebase · version 2</p>',
+        '<p class="s" style="margin:0;color:var(--muted);text-align:center">Homebase · version 3</p>',
       clicks: {
         ics: function (b) { exportIcs(+b.dataset.off); },
+        routine: function () { closeSheet(); setTimeout(routineSheet, 280); },
         update: function () { if (navigator.serviceWorker) navigator.serviceWorker.getRegistration().then(function (r) { if (r) r.update(); }); toast("Checking for updates…"); setTimeout(function () { location.reload(); }, 1200); },
         signout: function () { closeSheet(); signOut(); }
       }
     });
+  }
+  // A cook night counts toward the weekly target: it checks off today's cook block, or logs an extra night.
+  function logCook() {
+    var t = today(), blk = blocksOn(t).filter(function (x) { return x.b.kind === "cook" && !x.done; })[0];
+    if (blk) return toggleBlock(blk.key);
+    var key = "cook-extra-" + newId() + "_" + t;
+    save("routine_done", key, { block: "cook-extra", date: t, kind: "cook" });
+    toast("Cook night logged", function () { del("routine_done", key); });
   }
   function quickMenu(items) {
     openSheet({
@@ -679,28 +906,41 @@
       (sub.length ? '<div class="s">' + sub.join(" · ") + '</div>' : "") + '</div>' + (e.ref ? '<span class="pill muted">Class</span>' : "") + '</div>';
   }
 
+  function meter(label, val, target, unit, act) {
+    var pct = target ? Math.min(100, Math.round(100 * val / target)) : 0, hit = target && val >= target;
+    return '<button class="meter' + (hit ? " hit" : "") + '" data-act="' + act + '"><span class="m-l">' + label + '</span><b>' + (unit === "h" ? r1(val) : val) + '<small> / ' + target + (unit === "h" ? " h" : "") + '</small></b><span class="bar"><i style="width:' + pct + '%"></i></span></button>';
+  }
+  function weekCard() {
+    var p = weekProgress(), t = timer(), h = "";
+    if (paused(today())) return card("This week", '<div class="empty">Routine paused until ' + longDate(routine().pausedUntil) + '. Enjoy it.</div>', linkBtn("Routine", "routine"));
+    h += '<div class="meters">' + meter("Study", p.study, p.studyT, "h", "studywk") + meter("Runs", p.runs, p.runsT, "", "gofit") + meter("Cook", p.cook, p.cookT, "", "cookx") + '</div>';
+    if (t) {
+      var m = Math.round((Date.now() - t.start) / 60000);
+      h += '<div class="timer on"><div class="main"><div class="t">Studying ' + esc(studyLabel(t.cls)) + '</div><div class="s">Since ' + time24(pad(new Date(t.start).getHours()) + ":" + pad(new Date(t.start).getMinutes())) + ' · ' + hm(m) + '</div></div><button class="btn primary" data-act="tstop">Stop</button></div>';
+    } else h += '<button class="btn block" style="margin-top:10px" data-act="tstart">Start studying</button>';
+    return card("This week", h, linkBtn("Routine", "routine"));
+  }
+  function blockRow(e, ds) {
+    var x = e.blk, it = x.b.kind === "run" && plan() ? plan().days[ds] : null, sub = time24(x.b.end);
+    if (it) sub = it.type === "rest" ? "Plan says rest today" : it.title + (it.miles ? " · " + it.miles + " mi" : "");
+    else if (x.b.kind === "study") { var m = state.study.filter(function (s) { return s.block === x.key; }).reduce(function (a, s) { return a + (+s.minutes || 0); }, 0); sub = x.done ? hm(m) + " logged" : "Until " + time24(x.b.end); }
+    else sub = "Until " + time24(x.b.end);
+    return '<div class="item blk' + (x.done ? " done" : "") + '"><span class="time">' + time24(x.b.start) + '</span><div class="main tap" data-act="editblk" data-id="' + esc(x.key) + '"><div class="t"><span class="kdot k-' + x.b.kind + '"></span>' + esc(x.b.title) + '</div><div class="s">' + esc(sub) + '</div></div>' +
+      '<button class="check' + (x.done ? " on" : "") + '" data-act="blk" data-id="' + esc(x.key) + '" aria-pressed="' + x.done + '" aria-label="' + esc(x.b.title) + ' done"></button></div>';
+  }
+
   views.today = function () {
-    var t = today(), n = upNext(), h = "", set = checked();
+    var t = today(), n = upNext(), h = "";
     var hr = new Date().getHours();
     h += '<div class="hero"><div class="eyebrow">' + longDate(t) + (n ? " · Up next" : "") + '</div>' +
       (n ? '<div class="big">' + esc(n.e.title) + '</div><div class="when">' + whenText(n) + '</div>' + (n.e.place ? '<div class="where">' + esc(n.e.place) + '</div>' : "")
-        : '<div class="big">' + (hr < 12 ? "Good morning" : hr < 18 ? "Good afternoon" : "Good evening") + '</div><div class="where">Nothing else on the calendar.</div>') + '</div>';
-    var now = new Date(), evs = eventsOn(t).filter(function (e) { return !e.time || endOf(t, e) >= now; });
-    h += card("Today", evs.length ? '<div class="list">' + evs.map(function (e) { return eventRow(e, t); }).join("") + '</div>' : '<div class="empty">Nothing else today.</div>', linkBtn("Week", "goto", ' data-tab="schedule"'));
-    var p = plan(), it = p && p.days[t], ran = runsOn(t);
-    if (it || ran.length) {
-      var body = "";
-      if (it) body += '<div class="item tap" data-act="planday" data-date="' + t + '"><div class="main"><div class="t"><span class="type ' + it.type + '">' + it.type + '</span>' + esc(it.title) + (it.miles ? " · " + it.miles + " mi" : "") + '</div><div class="s">' + esc(it.detail) + '</div></div>' + ICON.chev + '</div>';
-      ran.forEach(function (w) { body += '<div class="item tap" data-act="editrun" data-id="' + w.id + '"><span class="pill good">Done</span><div class="main">' + esc(w.type === "Run" ? (w.kind || "Run") + " run" : w.type) + (w.miles ? " · " + r2(w.miles) + " mi" : "") + (w.minutes ? " · " + mmss(w.minutes * 60) : "") + '</div></div>'; });
-      if (it && it.type !== "rest" && !ran.length) body += '<button class="btn primary block" style="margin-top:8px" data-act="logplan" data-date="' + t + '">Log this run</button>';
-      h += card("Training", body, linkBtn("Plan", "goto", ' data-tab="fitness"'));
-    }
-    var hs = habits();
-    if (hs.length) h += card("Habits", '<div class="list">' + hs.map(function (g) {
-      var on = set[g.id + "_" + t];
-      return '<div class="item"><button class="check' + (on ? " on" : "") + '" data-act="habit" data-id="' + g.id + '" data-date="' + t + '" aria-pressed="' + !!on + '" aria-label="' + esc(g.title) + '"></button><div class="main t">' + esc(g.title) + '</div><span class="pill' + (streak(g.id, set) ? "" : " muted") + '">' + streak(g.id, set) + 'd</span></div>';
-    }).join("") + '</div>');
-    h += learnTodayCard();
+        : '<div class="big">' + (hr < 12 ? "Good morning" : hr < 18 ? "Good afternoon" : "Good evening") + '</div><div class="where">Nothing else planned.</div>') + '</div>';
+    h += weekCard();
+    var now = new Date(), items = dayItems(t).filter(function (e) { return e.blk || !e.time || endOf(t, e) >= now; });
+    var left = items.filter(function (e) { return e.blk && !e.blk.done; }).length, total = items.filter(function (e) { return e.blk; }).length;
+    h += card("Today" + (total ? ' <span class="pill' + (left ? " muted" : " good") + '">' + (total - left) + '/' + total + '</span>' : ""),
+      items.length ? '<div class="list">' + items.map(function (e) { return e.blk ? blockRow(e, t) : eventRow(e, t); }).join("") + '</div>' : '<div class="empty">Nothing else today.</div>',
+      linkBtn("Week", "goto", ' data-tab="schedule"'));
     return h;
   };
 
@@ -817,8 +1057,9 @@
     h += card(sel === t ? "Today" : longDate(sel), (evs.length ? '<p class="s" style="margin:-4px 0 8px;color:var(--muted);font-size:13px">' + plural(evs.length, "event") + (span ? " · " + span : "") + '</p>' : "") + (evs.length ? dayAgenda(sel, evs) : '<div class="empty">Nothing on this day.</div>'),
       sel !== t ? linkBtn("Jump to today", "sday", ' data-date="' + t + '"') : "");
     var mon = mondayOf(parse(sel)), n = 0;
-    for (var i = 0; i < 7; i++) n += eventsOn(ymd(addDays(mon, i))).filter(function (e) { return !e.ref; }).length;
-    h += card("Export this week", '<p class="s" style="margin:0 0 10px;color:var(--muted)">' + plural(n, "event") + ' for ' + shortDate(ymd(mon)) + '–' + shortDate(ymd(addDays(mon, 6))) + '. Classes and other events already in your calendar are left out.</p><button class="btn block" data-act="icssel">Download .ics</button>');
+    var wb = routine().alarms;
+    for (var i = 0; i < 7; i++) n += (wb ? dayItems : eventsOn)(ymd(addDays(mon, i))).filter(function (e) { return !e.ref; }).length;
+    h += card("Export this week", '<p class="s" style="margin:0 0 10px;color:var(--muted)">' + plural(n, "item") + ' for ' + shortDate(ymd(mon)) + '–' + shortDate(ymd(addDays(mon, 6))) + '. Classes and events already in your calendar are left out.' + (wb ? " Routine blocks come with a 5-minute alarm." : "") + '</p><button class="btn block" data-act="icssel">Download .ics</button>');
     h += termCard();
     return h;
   };
@@ -894,36 +1135,9 @@
   }
 
 
-  function weekSummary() {
-    var mon = mondayOf(new Date()), ms = ymd(mon), me = ymd(addDays(mon, 6)), t = today(), p = plan();
-    var wk = state.workouts.filter(function (w) { return w.date >= ms && w.date <= me; });
-    var runs = wk.filter(function (w) { return w.type === "Run"; }), other = wk.filter(function (w) { return w.type !== "Run"; });
-    var mi = weekMiles(ms), min = runs.reduce(function (a, w) { return a + (+w.minutes || 0); }, 0);
-    var prev = weekMiles(ymd(addDays(mon, -7))), four = 0;
-    for (var k = 1; k <= 4; k++) four += weekMiles(ymd(addDays(mon, -7 * k))) / 4;
-    var pw = p && p.weeks.filter(function (w) { return w.start === ms; })[0], toDate = 0;
-    if (p) for (var i = 0; i < 7; i++) { var ds = ymd(addDays(mon, i)); if (ds <= t && p.days[ds]) toDate += +p.days[ds].miles || 0; }
-    var L = [];
-    if (!wk.length) L.push("Nothing logged yet this week" + (pw ? ", with " + r1(pw.miles) + " miles planned." : "."));
-    else {
-      var line = runs.length ? plural(runs.length, "run") + " for " + r1(mi) + " mi" + (min ? " in " + Math.round(min) + " min" : "") : "";
-      var pace = mi && min ? paceOf(mi, min) : "";
-      if (line) L.push(line + (pace ? ", averaging " + pace + " /mi." : "."));
-      if (other.length) L.push(plural(other.length, "other session") + " (" + other.map(function (w) { return w.type.toLowerCase(); }).join(", ") + ").");
-      var rp = runs.filter(function (w) { return +w.rpe > 0; });
-      if (rp.length) L.push("Average effort " + r1(rp.reduce(function (a, w) { return a + +w.rpe; }, 0) / rp.length) + " out of 10.");
-    }
-    if (toDate) { var diff = r1(mi - toDate); L.push(Math.abs(diff) < 0.5 ? "Right on plan so far (" + r1(toDate) + " mi planned to date)." : Math.abs(diff) + " mi " + (diff > 0 ? "ahead of" : "behind") + " plan so far (" + r1(toDate) + " mi planned to date)."); }
-    if (prev > 0 || four > 0) { var bits = []; if (prev > 0) { var d = r1(mi - prev); bits.push((d >= 0 ? "up " : "down ") + Math.abs(d) + " mi on last week"); } if (four > 0) bits.push("4-week average is " + r1(four) + " mi"); L.push("Trend: " + bits.join("; ") + "."); }
-    if (p) for (var j = 0; j < 8; j++) { var nd = ymd(addDays(new Date(), j)), it = p.days[nd]; if (it && it.type !== "rest" && (j > 0 || !runsOn(nd).some(function (w) { return w.type === "Run"; }))) { L.push("Next up: " + (j === 0 ? "today" : j === 1 ? "tomorrow" : DAYS_LONG[parse(nd).getDay()]) + ", " + esc(it.title || it.type) + (it.miles ? " (" + r1(it.miles) + " mi)" : "") + "."); break; } }
-    return card("This week", '<p style="margin:0;line-height:1.5">' + L.join(" ") + '</p><p class="s" style="margin:8px 0 0;color:var(--muted);font-size:12px">Summary written from your logged workouts and plan.</p>');
-  }
-
   views.fitness = function () {
-    var h = '<div class="seg" role="tablist">' + [["stats", "Stats"], ["log", "Log"], ["plan", "Plan"]].map(function (s) { return '<button role="tab" class="' + (ui.fit === s[0] ? "on" : "") + '" data-act="fit" data-v="' + s[0] + '">' + s[1] + '</button>'; }).join("") + '</div>';
-    var p = plan(), t = today(), mon = mondayOf(new Date());
-    if (ui.fit === "plan") {
-      if (!p) return h + card("Training plan", '<div class="empty">No plan yet. Ask Claude in chat and it will build one for you.</div>');
+    var p = plan(), t = today(), mon = mondayOf(new Date()), h = "";
+    if (p) {
       var ws = addDays(mon, 7 * ui.planWeek), wsS = ymd(ws), wi = p.weeks.findIndex(function (w) { return w.start === wsS; });
       var wk = p.weeks[wi], planned = 0, done = weekMiles(wsS), rows = "";
       for (var i = 0; i < 7; i++) {
@@ -932,28 +1146,18 @@
         rows += '<div class="plan-day tap' + (ds === t ? " today" : "") + '" data-act="planday" data-date="' + ds + '"><div class="d">' + DAYS[parse(ds).getDay()] + '<b>' + parse(ds).getDate() + '</b></div><div style="min-width:0"><div><span class="type ' + it.type + '">' + it.type + '</span>' + esc(it.title) + '</div><div class="s" style="font-size:13px;color:var(--muted)">' + (it.miles ? it.miles + " mi" : "") + (ok ? " · ran " + r1(ran.reduce(function (a, w) { return a + (+w.miles || 0); }, 0)) + " mi" : "") + '</div></div>' +
           (it.type === "rest" ? "" : ok ? '<span class="pill good">✓</span>' : ds < t ? '<span class="pill muted">–</span>' : "") + '</div>';
       }
-      var head = '<div class="row" style="margin-bottom:8px"><button class="btn ghost" data-act="pweek" data-d="-1" aria-label="Previous week">‹</button><div class="grow" style="text-align:center"><b>' + (wk ? "Week " + (wi + 1) + " of " + p.weeks.length : shortDate(wsS)) + '</b><div class="s" style="font-size:13px;color:var(--muted)">' + (wk ? wk.phase.charAt(0).toUpperCase() + wk.phase.slice(1) + " phase · " : "") + r1(done) + " of " + r1(planned) + ' mi</div></div><button class="btn ghost" data-act="pweek" data-d="1" aria-label="Next week">›</button></div>' +
+      var head = '<div class="row" style="margin-bottom:8px"><button class="btn ghost" data-act="pweek" data-d="-1" aria-label="Previous week">‹</button><div class="grow" style="text-align:center"><b>' + (ui.planWeek === 0 ? "This week" : wk ? "Week " + (wi + 1) + " of " + p.weeks.length : shortDate(wsS)) + '</b><div class="s" style="font-size:13px;color:var(--muted)">' + r1(done) + " of " + r1(planned) + ' mi</div></div><button class="btn ghost" data-act="pweek" data-d="1" aria-label="Next week">›</button></div>' +
         '<div class="bar" style="margin-bottom:6px"><i style="width:' + (planned ? Math.min(100, Math.round(100 * done / planned)) : 0) + '%"></i></div>';
-      h += card(GOAL_LABEL[p.inputs.goal] + (p.inputs.raceDate ? " · " + shortDate(p.inputs.raceDate) : ""), head + (rows || '<div class="empty">This week is outside your plan.</div>'));
-      var P = paces(p.inputs);
-      if (P) h += card("Your paces", '<div class="list">' + [["Easy and long", mmss(P.easy[0]) + "–" + mmss(P.easy[1])], ["Tempo", mmss(P.tempo)], ["5K pace", mmss(P.i5k)], ["10K pace", mmss(P.p10)], ["Half marathon", mmss(P.ph)], ["Marathon", mmss(P.pm)]].concat(P.goal && p.inputs.goal !== "base" ? [["Goal pace", mmss(P.goal)]] : []).map(function (x) { return '<div class="item"><div class="main">' + x[0] + '</div><b style="font-variant-numeric:tabular-nums">' + x[1] + ' /mi</b></div>'; }).join("") + '</div><p class="s" style="margin:8px 0 0;color:var(--muted);font-size:13px">' + (p.custom ? 'Target paces for a ' + esc(p.inputs.goalTime || p.inputs.raceTime) + ' 5K.' : 'Estimated from your ' + esc({ "1mi": "mile", "5k": "5K", "10k": "10K", half: "half marathon", marathon: "marathon" }[p.inputs.raceDist]) + ' time of ' + esc(p.inputs.raceTime) + '.') + ' Run by feel on hot or hilly days.</p>');
-      return h;
-    }
-    if (ui.fit === "log") {
-      var recent = state.workouts.slice().sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; }).slice(0, 30);
-      return h + card("Workouts", recent.length ? '<div class="list">' + recent.map(function (w) {
-        var run = w.type === "Run", pace = run ? paceOf(+w.miles, +w.minutes) : "";
-        return '<div class="item tap" data-act="editrun" data-id="' + w.id + '"><span class="time">' + shortDate(w.date) + '</span><div class="main"><div class="t">' + esc(run ? (w.kind || "Run") + " run" : w.type) + (run && +w.miles ? " · " + r2(w.miles) + " mi" : "") + '</div><div class="s">' + [w.minutes ? mmss(w.minutes * 60) : "", pace ? pace + " /mi" : "", w.rpe ? "effort " + w.rpe : "", esc(w.note || "")].filter(Boolean).join(" · ") + '</div></div></div>';
-      }).join("") + '</div>' : '<div class="empty">No workouts yet. Tap + to log your first run.</div>', linkBtn("Log", "newrun"));
-    }
+      h += card("Training plan", head + (rows || '<div class="empty">This week is outside your plan.</div>'));
+    } else h += card("Training plan", '<div class="empty">No plan yet. Ask Claude in chat and it will build one for you.</div>');
     var weeks = []; for (var k = 7; k >= 0; k--) { var s0 = ymd(addDays(mon, -7 * k)), pw = p && p.weeks.filter(function (w) { return w.start === s0; })[0]; weeks.push({ label: parse(s0).toLocaleDateString(undefined, { month: "numeric", day: "numeric" }), mi: weekMiles(s0), plan: pw ? pw.miles : 0 }); }
-    var runs = state.workouts.filter(function (w) { return w.type === "Run" && +w.miles > 0; });
-    var longest = runs.reduce(function (a, w) { return Math.max(a, +w.miles); }, 0);
-    var best = runs.filter(function (w) { return +w.miles >= 3 && +w.minutes > 0; }).sort(function (a, b) { return a.minutes / a.miles - b.minutes / b.miles; })[0];
-    var total30 = runs.filter(function (w) { return w.date >= ymd(addDays(new Date(), -30)); }).reduce(function (a, w) { return a + +w.miles; }, 0);
-    h += weekSummary();
-    h += card("Mileage", '<div class="stats" style="margin-bottom:10px"><div class="stat"><b>' + r1(weekMiles(ymd(mon))) + '</b><span>this week</span></div><div class="stat"><b>' + r1(total30) + '</b><span>last 30 days</span></div><div class="stat"><b>' + (longest ? r1(longest) : "–") + '</b><span>longest run</span></div></div>' + chart(weeks) +
-      '<p class="s" style="margin:6px 0 0;color:var(--muted);font-size:13px">' + (p ? "Dashed outline shows planned miles. " : "") + (best ? "Fastest 3+ mile run: " + paceOf(+best.miles, +best.minutes) + " /mi on " + shortDate(best.date) + "." : "") + '</p>');
+    h += card("Mileage", '<p class="s" style="margin:-4px 0 8px;color:var(--muted);font-size:13px">' + r1(weekMiles(ymd(mon))) + ' mi this week' + (p ? " · dashed bars are planned miles" : "") + '</p>' + chart(weeks));
+    var recent = state.workouts.slice().sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
+    var lim = ui.allRuns ? 60 : 5;
+    h += card("Recent workouts", recent.length ? '<div class="list">' + recent.slice(0, lim).map(function (w) {
+      var run = w.type === "Run", pace = run ? paceOf(+w.miles, +w.minutes) : "";
+      return '<div class="item tap" data-act="editrun" data-id="' + w.id + '"><span class="time">' + shortDate(w.date) + '</span><div class="main"><div class="t">' + esc(run ? (w.kind || "Run") + " run" : w.type) + (run && +w.miles ? " · " + r2(w.miles) + " mi" : "") + '</div><div class="s">' + [w.minutes ? mmss(w.minutes * 60) : "", pace ? pace + " /mi" : "", w.rpe ? "effort " + w.rpe : ""].filter(Boolean).join(" · ") + '</div></div></div>';
+    }).join("") + '</div>' + (recent.length > 5 ? '<button class="btn ghost block" style="margin-top:6px" data-act="allruns">' + (ui.allRuns ? "Show less" : "Show all") + '</button>' : "") : '<div class="empty">No workouts yet. Tap + to log one.</div>', linkBtn("Log", "newrun"));
     h += weightCard();
     return h;
   };
@@ -1133,7 +1337,6 @@
     if (tab !== lastTab) {
       $("tabs").innerHTML = TABS.map(function (t) { return '<a href="#' + t[0] + '"' + (t[0] === tab ? ' aria-current="page"' : "") + '>' + ICON[t[0]] + t[1] + '</a>'; }).join("");
       $("title").textContent = { today: "Today", schedule: "Schedule", meals: "Meals", goals: "Goals", faith: "Faith", learn: "Learn", fitness: "Fitness" }[tab];
-      $("fab").hidden = tab === "learn";
     }
     var html = views[tab]();
     if (html !== lastHtml || tab !== lastTab) { view.innerHTML = html; lastHtml = html; }
@@ -1151,6 +1354,15 @@
     var a = b.dataset.act, id = b.dataset.id, ds = b.dataset.date, t = today();
     switch (a) {
       case "goto": location.hash = b.dataset.tab; break;
+      case "blk": toggleBlock(id); break;
+      case "editblk": blockDetail(id); break;
+      case "routine": routineSheet(); break;
+      case "studywk": studyWeekSheet(); break;
+      case "gofit": location.hash = "fitness"; break;
+      case "cookx": logCook(); break;
+      case "tstart": timerStartSheet(); break;
+      case "tstop": stopTimer(); break;
+      case "allruns": ui.allRuns = !ui.allRuns; render(true); break;
       case "editev": eventDetail(id, ds); break;
       case "sday": ui.schedDate = ds; render(true); break;
       case "schedseg": ui.sched = b.dataset.v; render(true); break;
@@ -1249,7 +1461,7 @@
     if (tab === "fitness") return runSheet();
     if (tab === "goals") return quickMenu([["Habit", function () { habitSheet(); }], ["Goal", function () { goalSheet(); }]]);
     if (tab === "meals") return quickMenu([["Meal today", function () { mealSheet(today(), new Date().getHours() < 11 ? "breakfast" : new Date().getHours() < 16 ? "lunch" : "dinner"); }], ["Grocery item", function () { var el = $("gtext"); if (el) el.focus(); }]]);
-    quickMenu([["Event", function () { eventSheet(null, today()); }], ["To-do", function () { todoSheet(); }], ["Workout", function () { runSheet(); }], ["Habit", function () { habitSheet(); }], ["Goal", function () { goalSheet(); }]]);
+    quickMenu([["Event", function () { eventSheet(null, today()); }], ["To-do", function () { todoSheet(); }], ["Workout", function () { runSheet(); }], ["Study time", function () { studyLogSheet(); }], ["Cook night", logCook], ["Routine", routineSheet]]);
   });
   $("settings-btn").addEventListener("click", settingsSheet);
 
@@ -1261,10 +1473,12 @@
     L.push("BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Homebase//Weekly export//EN", "CALSCALE:GREGORIAN");
     for (var i = 0; i < 7; i++) {
       var day = addDays(start, i), ds = ymd(day), dc = ds.replace(/-/g, "");
-      eventsOn(ds).filter(function (e) { return !e.ref; }).forEach(function (e) {
-        n++; L.push("BEGIN:VEVENT", "UID:" + e.id + "-" + dc + "@homebase", "DTSTAMP:" + dt, "SUMMARY:" + icsText(e.title));
+      var withBlocks = routine().alarms;
+      (withBlocks ? dayItems(ds) : eventsOn(ds)).filter(function (e) { return !e.ref; }).forEach(function (e) {
+        n++; L.push("BEGIN:VEVENT", "UID:" + (e.blk ? "blk-" + e.blk.b.id : e.id) + "-" + dc + "@homebase", "DTSTAMP:" + dt, "SUMMARY:" + icsText(e.title));
         if (e.place) L.push("LOCATION:" + icsText(e.place));
         if (e.notes) L.push("DESCRIPTION:" + icsText(e.notes));
+        if (e.blk) L.push("CATEGORIES:Homebase routine", "BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:" + icsText(e.title), "TRIGGER:-PT5M", "END:VALARM");
         if (e.time) {
           var p = e.time.split(":"), q = e.end && e.end > e.time ? e.end.split(":") : [pad((+p[0] + 1) % 24), p[1]];
           L.push("DTSTART:" + dc + "T" + p[0] + p[1] + "00", "DTEND:" + dc + "T" + q[0] + q[1] + "00");
@@ -1335,6 +1549,8 @@
       var next = {}; COLS.forEach(function (c) { next[c] = []; });
       r.data.forEach(function (row) { if (next[row.collection]) next[row.collection].push(Object.assign({ id: row.id }, row.data)); });
       state = next; persist(); schedule();
+      // First run after the overhaul: store the starting routine so the Dayboard feed can read it too.
+      if (!byId("settings", "routine")) saveRoutine(routine());
     });
   }
   function listen() {
