@@ -1,6 +1,6 @@
 # Homebase
 
-One installable app for schedule, meals, goals, learning, and running.
+One installable app for schedule, routine, study, and running. Three tabs: Today, Schedule, Fitness.
 
 - **Front end:** plain HTML, CSS and JavaScript. No build step.
 - **Data:** Supabase (Postgres with row-level security). Each user only sees their own rows.
@@ -16,9 +16,16 @@ One installable app for schedule, meals, goals, learning, and running.
 - `supabase/migrations/`: database schema
 - `supabase/functions/dayboard-feed/`: HTTPS feed for the TV Dayboard (to-dos, events, term classes). Deployed with JWT verification off; it checks `?key=` against the SHA-256 hashes in `dayboard_feed_keys`
 
+## Routine
+- `settings/routine` `{targets:{break,school:{study,runs,cook}}, blocks:{break:[...], school:[...]}, alarms, pausedUntil}`. A block is `{id, kind, title, days[0=Sun..6=Sat], start, end}`; kinds are run, study, cook, bible, strength, clean, other. School blocks apply between the term's start and end dates, break blocks otherwise. The app stores the starting template on first load.
+- Done marks: `routine_done/<blockId>_<date>` `{block, date, kind}`. Weekly cook count = cook marks that week; runs = days with a Run workout or a done run block.
+- Study time: `study` collection `{date, cls (class id or "other"), minutes, block}`. A running timer is `settings/timer` `{start (ms), cls}`.
+- Goals, habits, Learn and Meals are hidden from the tab bar; their code and data are kept.
+
 ## Data for the Dayboard
 - To-dos: `todos` collection `{title, notes, due_date, due_time, priority, list, done, done_at}`
 - School term: `settings/term` `{name, start, end, skip[]}` and the `classes` collection `{code, name, days[1=Mon..5=Fri], start, end, room, until}`
+- Routine: the feed's `routine` object has `mode`, `paused`, `today` (blocks with `id`, `kind`, `title`, `start`, `end`, `done`, `detail`), `week` (study hours, runs and cook nights with targets) and `timer`. POST `{"action":"set_block_done","id","done"}` marks a block done; a study block checked off on the TV logs its planned length.
 - Events can carry an optional `group` (for example `TomorrowX`) so the TV can collapse a day of sessions
 
 ## Run locally
