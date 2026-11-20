@@ -183,7 +183,9 @@
     return { study: studyMin / 60, studyT: +tg.study || 0, runs: Object.keys(runDays).length, runsT: +tg.runs || 0, cook: cook, cookT: +tg.cook || 0 };
   }
   function studyLabel(cls) { var c = byId("classes", cls); return c ? (c.code || c.name) : "General"; }
-  function studyOptions() { return classesSorted().map(function (c) { return [c.id, c.code ? c.code + " · " + c.name : c.name]; }).concat([["other", "General"]]); }
+  // Classes that meet at least once this term (a dropped class ends before the term starts).
+  function activeClasses() { var tm = term(); return classesSorted().filter(function (c) { return !c.until || !tm || c.until >= tm.start; }); }
+  function studyOptions() { return activeClasses().map(function (c) { return [c.id, c.code ? c.code + " · " + c.name : c.name]; }).concat([["other", "General"]]); }
   function timer() { var t = setting("timer"); return t.start ? t : null; }
   function hm(m) { m = Math.round(m); return m >= 60 ? Math.floor(m / 60) + "h" + (m % 60 ? " " + m % 60 + "m" : "") : m + "m"; }
 
@@ -723,7 +725,7 @@
   function studyWeekSheet() {
     var w = weekRange(), p = weekProgress(), by = {}, list = state.study.filter(function (s) { return s.date >= w[0] && s.date <= w[1]; });
     list.forEach(function (s) { by[s.cls] = (by[s.cls] || 0) + (+s.minutes || 0); });
-    var cls = classesSorted().filter(function (c) { return modeOn(today()) !== "school" || !c.until || c.until >= today(); });
+    var cls = activeClasses().filter(function (c) { return modeOn(today()) !== "school" || !c.until || c.until >= today(); });
     var share = cls.length && p.studyT ? p.studyT * 60 / cls.length : 0;
     var rows = cls.map(function (c) { var m = by[c.id] || 0; return '<div class="item"><div class="main"><div class="t">' + esc(c.code || c.name) + '</div>' + (share ? '<div class="bar" style="margin-top:6px"><i style="width:' + Math.min(100, Math.round(100 * m / share)) + '%"></i></div>' : "") + '</div><b style="font-variant-numeric:tabular-nums">' + hm(m) + (share ? '<small style="color:var(--muted);font-weight:500"> / ' + hm(share) + '</small>' : "") + '</b></div>'; }).join("");
     if (by.other) rows += '<div class="item"><div class="main t">General</div><b>' + hm(by.other) + '</b></div>';
